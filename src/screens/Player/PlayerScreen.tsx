@@ -54,7 +54,8 @@ import {
 
 type PlayerScreenProps = {
   channel: M3UChannel;
-  onBack: () => void;
+  /** Receives the item on screen when leaving (after zapping it differs from `channel`). */
+  onBack: (lastPlayed?: M3UChannel) => void;
   // Kept for compatibility with App.tsx/settings flow.
   preferredQuality?: string;
   autoplay?: boolean;
@@ -2296,14 +2297,15 @@ export default function PlayerScreen({
           return;
         }
 
-        onBack();
+        onBack(zappedChannel || channel);
       },
       [
         activeEpisode,
-        channel.contentType,
+        channel,
         clearHideTimer,
         movieStarted,
         onBack,
+        zappedChannel,
       ],
     );
 

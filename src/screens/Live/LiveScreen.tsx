@@ -23,8 +23,12 @@ type Props = {
   /** `queue` is the list currently on screen; the player zaps through it. */
   onOpenPlayer: (channel: M3UChannel, queue: M3UChannel[]) => void;
   onBackHome: () => void;
-  /** Pre-select a category (from Home's category shortcuts). */
+  /** Pre-select a category (Home shortcut, or the one in use before opening the player). */
   initialGroup?: string | null;
+  /** Remembers the chosen category across player visits. */
+  onGroupChange?: (group: string | null) => void;
+  /** Channel to scroll to and focus when returning from the player. */
+  focusChannelId?: string | null;
 };
 
 type Group = { key: string; label: string; count: number };
@@ -39,7 +43,7 @@ const ALL = '__all__';
  * The visible, filtered list is what the player receives as its zapping queue,
  * so UP/DOWN in the player never jumps to a channel outside it.
  */
-export default function LiveScreen({ channels, onOpenPlayer, onBackHome, initialGroup }: Props) {
+export default function LiveScreen({ channels, onOpenPlayer, onBackHome, initialGroup, onGroupChange, focusChannelId }: Props) {
   const { language } = useAppPreferences();
   const palette = usePalette();
   const device = useDeviceClass();
@@ -55,6 +59,14 @@ export default function LiveScreen({ channels, onOpenPlayer, onBackHome, initial
   useEffect(() => {
     if (initialGroup) setGroup(initialGroup);
   }, [initialGroup]);
+
+  const selectGroup = useCallback(
+    (key: string) => {
+      setGroup(key);
+      onGroupChange?.(key === ALL ? null : key);
+    },
+    [onGroupChange],
+  );
 
   const groups = useMemo<Group[]>(() => {
     const counts = new Map<string, number>();
@@ -81,6 +93,13 @@ export default function LiveScreen({ channels, onOpenPlayer, onBackHome, initial
     (channel: M3UChannel) => onOpenPlayer(channel, filtered),
     [filtered, onOpenPlayer],
   );
+
+  // Returning from the player: start the list at the channel that was playing.
+  const focusIndex = useMemo(
+    () => (focusChannelId ? filtered.findIndex(c => String(c.id) === focusChannelId) : -1),
+    [filtered, focusChannelId],
+  );
+  const rowHeight = SHASHTNA_THEME.layout.liveCardH + (columns === 1 ? 10 : 14);
 
   const activeGroupLabel = groups.find(g => g.key === group)?.label || groups[0].label;
 
@@ -151,12 +170,21 @@ export default function LiveScreen({ channels, onOpenPlayer, onBackHome, initial
       contentContainerStyle={styles.list}
       showsVerticalScrollIndicator={false}
       removeClippedSubviews
+      initialScrollIndex={focusIndex > 0 ? Math.floor(focusIndex / columns) : undefined}
+      getItemLayout={(_data, index) => ({ length: rowHeight, offset: rowHeight * index, index })}
       initialNumToRender={18}
       maxToRenderPerBatch={12}
       windowSize={7}
       renderItem={({ item, index }) => (
         <View style={[styles.cell, columns === 1 && styles.cellSingle]}>
-          <ChannelCard channel={item} number={index + 1} onOpen={openChannel} ar={ar} palette={palette} />
+          <ChannelCard
+            channel={item}
+            number={index + 1}
+            onOpen={openChannel}
+            ar={ar}
+            palette={palette}
+            preferred={index === focusIndex}
+          />
         </View>
       )}
       ListEmptyComponent={
@@ -188,7 +216,7 @@ export default function LiveScreen({ channels, onOpenPlayer, onBackHome, initial
             return (
               <Pressable
                 key={g.key}
-                onPress={() => setGroup(g.key)}
+                onPress={() => selectGroup(g.key)}
                 style={({ pressed }) => [
                   styles.chip,
                   { backgroundColor: palette.surface, borderColor: palette.border },
@@ -224,7 +252,7 @@ export default function LiveScreen({ channels, onOpenPlayer, onBackHome, initial
             windowSize={9}
             contentContainerStyle={styles.groupList}
             renderItem={({ item }) => (
-              <GroupItem group={item} active={item.key === group} onSelect={setGroup} ar={ar} palette={palette} />
+              <GroupItem group={item} active={item.key === group} onSelect={selectGroup} ar={ar} palette={palette} />
             )}
           />
         </TVFocusGuideView>
@@ -285,18 +313,21 @@ const ChannelCard = memo(function ChannelCard({
   onOpen,
   ar,
   palette,
+  preferred = false,
 }: {
   channel: M3UChannel;
   number: number;
   onOpen: (channel: M3UChannel) => void;
   ar: boolean;
   palette: Palette;
+  preferred?: boolean;
 }) {
   const [failed, setFailed] = useState(false);
 
   return (
     <Pressable
       focusable
+      hasTVPreferredFocus={preferred}
       accessibilityRole="button"
       accessibilityLabel={channel.name}
       onPress={() => onOpen(channel)}

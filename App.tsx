@@ -334,6 +334,8 @@ function LiveTV({
   onOpenPlayer,
   onBackHome,
   initialGroup,
+  onGroupChange,
+  focusChannelId,
 }: {
   channels: M3UChannel[];
   onOpenPlayer: (
@@ -342,6 +344,8 @@ function LiveTV({
   ) => void;
   onBackHome: () => void;
   initialGroup: string | null;
+  onGroupChange: (group: string | null) => void;
+  focusChannelId: string | null;
 }) {
   /*
    * Live page يستقبل فقط:
@@ -370,6 +374,8 @@ function LiveTV({
         onBackHome
       }
       initialGroup={initialGroup}
+      onGroupChange={onGroupChange}
+      focusChannelId={focusChannelId}
     />
   );
 }
@@ -392,7 +398,7 @@ function Player({
   options,
 }: {
   channel: M3UChannel;
-  onBack: () => void;
+  onBack: (lastPlayed?: M3UChannel) => void;
   preferredQuality: PreferredQuality;
   autoplay: boolean;
   subtitles: boolean;
@@ -602,6 +608,7 @@ function AppContent() {
   const [restoringConnection, setRestoringConnection] = useState(true);
   const [playerOptions, setPlayerOptions] = useState<PlayerLaunchOptions>({});
   const [liveInitialGroup, setLiveInitialGroup] = useState<string | null>(null);
+  const [lastLiveChannelId, setLastLiveChannelId] = useState<string | null>(null);
   const navItems = useMemo(() => getNavItems(language), [language]);
 
   const pageOpacity = useRef(new Animated.Value(1)).current;
@@ -612,6 +619,7 @@ function AppContent() {
   useEffect(() => {
     if (activeNav !== 'live') {
       setLiveInitialGroup(null);
+      setLastLiveChannelId(null);
     }
   }, [activeNav]);
 
@@ -1044,11 +1052,16 @@ function AppContent() {
               subtitles
             }
             options={playerOptions}
-            onBack={() =>
+            onBack={lastPlayed => {
+              if (lastPlayed?.contentType === 'live') {
+                // Lets Live TV scroll back to and focus the channel just watched.
+                setLastLiveChannelId(String(lastPlayed.id));
+              }
+
               setSelectedChannel(
                 null,
-              )
-            }
+              );
+            }}
           />
         </View>
       </AppPreferencesProvider>
@@ -1074,6 +1087,8 @@ function AppContent() {
           handleBackHome
         }
         initialGroup={liveInitialGroup}
+        onGroupChange={setLiveInitialGroup}
+        focusChannelId={lastLiveChannelId}
       />
     );
   } else if (
