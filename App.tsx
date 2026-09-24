@@ -33,6 +33,7 @@ import AppIcon, { AppIconName } from './src/components/common/AppIcon';
 import { AppPreferencesProvider, useAppPreferences } from './src/design/AppPreferencesContext';
 import { focusStyle, usePalette } from './src/design/palette';
 import AppShell from './src/app/AppShell';
+import { ContinueWatchingEntry } from './src/features/continueWatching/continueWatchingStore';
 import Sidebar from './src/navigation/Sidebar';
 
 import {
@@ -332,12 +333,15 @@ function LiveTV({
   channels,
   onOpenPlayer,
   onBackHome,
+  initialGroup,
 }: {
   channels: M3UChannel[];
   onOpenPlayer: (
     channel: M3UChannel,
+    queue: M3UChannel[],
   ) => void;
   onBackHome: () => void;
+  initialGroup: string | null;
 }) {
   /*
    * Live page يستقبل فقط:
@@ -365,9 +369,19 @@ function LiveTV({
       onBackHome={
         onBackHome
       }
+      initialGroup={initialGroup}
     />
   );
 }
+
+type PlayerLaunchOptions = {
+  /** Live list the channel was picked from (enables in-player zapping). */
+  liveQueue?: M3UChannel[];
+  /** Series episode to open directly (Continue Watching). */
+  startEpisode?: M3UChannel | null;
+  /** Start a movie without its details page (Continue Watching). */
+  autoStart?: boolean;
+};
 
 function Player({
   channel,
@@ -375,12 +389,14 @@ function Player({
   preferredQuality,
   autoplay,
   subtitles,
+  options,
 }: {
   channel: M3UChannel;
   onBack: () => void;
   preferredQuality: PreferredQuality;
   autoplay: boolean;
   subtitles: boolean;
+  options: PlayerLaunchOptions;
 }) {
   return (
     <PlayerScreen
@@ -389,6 +405,9 @@ function Player({
       preferredQuality={preferredQuality}
       autoplay={autoplay}
       subtitles={subtitles}
+      liveQueue={options.liveQueue}
+      startEpisode={options.startEpisode}
+      autoStart={options.autoStart}
     />
   );
 }
@@ -581,12 +600,20 @@ function App() {
   const [themeMode, setThemeMode] = useState<ThemeMode>('dark');
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
   const [restoringConnection, setRestoringConnection] = useState(true);
+  const [playerOptions, setPlayerOptions] = useState<PlayerLaunchOptions>({});
+  const [liveInitialGroup, setLiveInitialGroup] = useState<string | null>(null);
   const navItems = useMemo(() => getNavItems(language), [language]);
 
   const pageOpacity = useRef(new Animated.Value(1)).current;
   const pageTranslate = useRef(new Animated.Value(0)).current;
   const pageScale = useRef(new Animated.Value(1)).current;
   const firstPageRender = useRef(true);
+
+  useEffect(() => {
+    if (activeNav !== 'live') {
+      setLiveInitialGroup(null);
+    }
+  }, [activeNav]);
 
   useEffect(() => {
     if (firstPageRender.current) {
@@ -838,7 +865,10 @@ function App() {
   const handleOpenPlayer =
     async (
       channel: M3UChannel,
+      options: PlayerLaunchOptions = {},
     ) => {
+      setPlayerOptions(options);
+
       if (
         channel.contentType ===
           'series' &&
@@ -887,6 +917,23 @@ function App() {
         );
       }
     };
+
+  /** Continue Watching: reopen the exact movie/episode where it stopped. */
+  const handleResume = (entry: ContinueWatchingEntry) => {
+    if (entry.parent) {
+      setPlayerOptions({ startEpisode: entry.item });
+      setSelectedChannel(entry.parent);
+      return;
+    }
+
+    setPlayerOptions({ autoStart: entry.item.contentType === 'movie' });
+    setSelectedChannel(entry.item);
+  };
+
+  const openLiveGroup = (group: string) => {
+    setLiveInitialGroup(group);
+    setActiveNav('live');
+  };
 
   if (restoringConnection) {
     return (
@@ -980,6 +1027,7 @@ function App() {
             subtitles={
               subtitles
             }
+            options={playerOptions}
             onBack={() =>
               setSelectedChannel(
                 null,
@@ -1003,12 +1051,13 @@ function App() {
         channels={
           channels
         }
-        onOpenPlayer={
-          handleOpenPlayer
+        onOpenPlayer={(channel, queue) =>
+          handleOpenPlayer(channel, { liveQueue: queue })
         }
         onBackHome={
           handleBackHome
         }
+        initialGroup={liveInitialGroup}
       />
     );
   } else if (

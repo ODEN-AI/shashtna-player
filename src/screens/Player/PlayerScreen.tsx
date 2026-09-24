@@ -10,6 +10,7 @@
 import {
   ActivityIndicator,
   BackHandler,
+  useTVEventHandler,
   Dimensions,
   Image,
   Modal,
@@ -40,6 +41,16 @@ import {
 
 import { SHASHTNA_THEME } from '../../design/theme';
 import { useAppPreferences } from '../../design/AppPreferencesContext';
+import AppIcon, { AppIconName } from '../../components/common/AppIcon';
+import SeekBar from '../../features/player/SeekBar';
+import ChannelBanner, { ChannelBannerState } from '../../features/player/ChannelBanner';
+import { describePlaybackError } from '../../features/player/playbackErrors';
+import { createProgressStore, formatClock, ProgressStore } from '../../features/player/progressStore';
+import {
+  ensureContinueWatchingLoaded,
+  getResumePosition,
+  recordProgress,
+} from '../../features/continueWatching/continueWatchingStore';
 
 type PlayerScreenProps = {
   channel: M3UChannel;
@@ -48,7 +59,19 @@ type PlayerScreenProps = {
   preferredQuality?: string;
   autoplay?: boolean;
   subtitles?: boolean;
+  /** Live list the channel was opened from; enables in-player zapping. */
+  liveQueue?: M3UChannel[];
+  /** Open this series episode directly (Continue Watching). */
+  startEpisode?: M3UChannel | null;
+  /** Skip the movie details page and start playback (Continue Watching). */
+  autoStart?: boolean;
 };
+
+/** Coalesces rapid UP/DOWN presses so only the final channel opens a stream. */
+const ZAP_COMMIT_MS = 450;
+const ZAP_BANNER_MS = 3000;
+/** Continue Watching is written at most this often during playback. */
+const RESUME_SAVE_INTERVAL_MS = 10000;
 
 type Track = {
   index: number;
@@ -440,6 +463,23 @@ function uniqueVideoTracks(
   );
 }
 
+const GLYPH_ICONS: Record<string, { name: AppIconName; flip?: boolean }> = {
+  '‹': { name: 'back' },
+  '›': { name: 'back', flip: true },
+  '↻': { name: 'refresh' },
+  '▶': { name: 'play' },
+  '❚❚': { name: 'pause' },
+  '↶': { name: 'rewind' },
+  '↷': { name: 'forward' },
+  'A': { name: 'audio' },
+  'CC': { name: 'subtitle' },
+  'HD': { name: 'quality' },
+  '⛶': { name: 'fullscreen' },
+  '×': { name: 'close' },
+  '▲': { name: 'channelUp' },
+  '▼': { name: 'channelDown' },
+};
+
 function ControlButton({
   icon,
   label,
@@ -447,6 +487,7 @@ function ControlButton({
   disabled = false,
   preferred = false,
   compact = false,
+  large = false,
 }: {
   icon: string;
   label: string;
@@ -454,7 +495,10 @@ function ControlButton({
   disabled?: boolean;
   preferred?: boolean;
   compact?: boolean;
+  /** Bigger touch target (mobile channel switching). */
+  large?: boolean;
 }) {
+  const glyph = GLYPH_ICONS[icon];
   const [
     focused,
     setFocused,
@@ -491,6 +535,8 @@ function ControlButton({
       }
       style={[
         styles.controlButton,
+        large &&
+          styles.controlButtonLarge,
         compact &&
           styles.controlButtonCompact,
         disabled &&
@@ -499,15 +545,21 @@ function ControlButton({
           styles.controlButtonFocused,
       ]}
     >
-      <Text
-        style={[
-          styles.controlIcon,
-          disabled &&
-            styles.controlIconDisabled,
-        ]}
-      >
-        {icon}
-      </Text>
+      {glyph ? (
+        <View style={[styles.controlIconBox, !compact && styles.controlIconGap, glyph.flip && styles.flipX]}>
+          <AppIcon name={glyph.name} size={large ? 26 : 21} color={disabled ? '#94A3B8' : '#FFFFFF'} />
+        </View>
+      ) : (
+        <Text
+          style={[
+            styles.controlIcon,
+            disabled &&
+              styles.controlIconDisabled,
+          ]}
+        >
+          {icon}
+        </Text>
+      )}
 
       {!compact && (
         <Text
@@ -1979,6 +2031,9 @@ function MovieDetailsView({
 export default function PlayerScreen({
   channel,
   onBack,
+  liveQueue,
+  startEpisode = null,
+  autoStart = false,
 }: PlayerScreenProps) {
   const { language } = useAppPreferences();
   const ar = language === 'ar';
@@ -1987,13 +2042,19 @@ export default function PlayerScreen({
     setActiveEpisode,
   ] =
     useState<M3UChannel | null>(
-      null,
+      startEpisode,
     );
 
   const [
     movieStarted,
     setMovieStarted,
-  ] = useState(false);
+  ] = useState(autoStart);
+
+  // Channel chosen by in-player zapping; null means "the channel we were opened with".
+  const [
+    zappedChannel,
+    setZappedChannel,
+  ] = useState<M3UChannel | null>(null);
 
   const videoRef =
     useRef<VideoRef>(
@@ -2009,6 +2070,7 @@ export default function PlayerScreen({
 
   const playbackChannel =
     activeEpisode ||
+    zappedChannel ||
     channel;
 
   const isSeriesDetails =
@@ -2037,17 +2099,18 @@ export default function PlayerScreen({
   ] =
     useState(0);
 
-  const [
-    currentTime,
-    setCurrentTime,
-  ] =
-    useState(0);
+  // Position/buffer live in an external store so 500 ms progress events
+  // re-render only the SeekBar, not the whole player.
+  const progressStoreRef =
+    useRef<ProgressStore | null>(null);
 
-  const [
-    playableDuration,
-    setPlayableDuration,
-  ] =
-    useState(0);
+  if (!progressStoreRef.current) {
+    progressStoreRef.current =
+      createProgressStore();
+  }
+
+  const progress =
+    progressStoreRef.current;
 
   const [
     loading,
@@ -2152,29 +2215,47 @@ export default function PlayerScreen({
   const isLive =
     duration <= 0;
 
-  const progressRatio =
-    duration > 0
-      ? Math.min(
-          1,
-          Math.max(
-            0,
-            currentTime /
-              duration,
-          ),
-        )
-      : 0;
+  const [
+    errorInfo,
+    setErrorInfo,
+  ] = useState<{ title: string; message: string; technical: string } | null>(null);
 
-  const bufferedRatio =
-    duration > 0
-      ? Math.min(
-          1,
-          Math.max(
-            0,
-            playableDuration /
-              duration,
-          ),
-        )
-      : 0;
+  const [
+    showDiagnostics,
+    setShowDiagnostics,
+  ] = useState(false);
+
+  const [
+    banner,
+    setBanner,
+  ] = useState<ChannelBannerState | null>(null);
+
+  const [
+    resumeNotice,
+    setResumeNotice,
+  ] = useState<string | null>(null);
+
+  const [
+    scrubbing,
+    setScrubbing,
+  ] = useState(false);
+
+  const canZap =
+    channel.contentType === 'live' &&
+    (liveQueue?.length ?? 0) > 1;
+
+  // Refs read by long-lived callbacks (TV key handler, timers, progress).
+  const durationRef = useRef(0);
+  durationRef.current = duration;
+  const playbackChannelRef = useRef(playbackChannel);
+  playbackChannelRef.current = playbackChannel;
+  const resumeParentRef = useRef<M3UChannel | undefined>(undefined);
+  resumeParentRef.current = activeEpisode ? channel : undefined;
+  const lastSaveAtRef = useRef(0);
+  const suppressWakeRef = useRef(false);
+  const zapTargetRef = useRef<number | null>(null);
+  const zapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const clearHideTimer =
     useCallback(
@@ -2201,6 +2282,7 @@ export default function PlayerScreen({
         if (
           paused ||
           menu ||
+          scrubbing ||
           isSeriesDetails ||
           isMovieDetails
         ) {
@@ -2218,6 +2300,7 @@ export default function PlayerScreen({
         clearHideTimer,
         menu,
         paused,
+        scrubbing,
         isMovieDetails,
         isSeriesDetails,
       ],
@@ -2322,10 +2405,14 @@ export default function PlayerScreen({
 
   useEffect(() => {
     setActiveEpisode(
-      null,
+      startEpisode,
     );
 
-    setMovieStarted(false);
+    setMovieStarted(autoStart);
+
+    setZappedChannel(null);
+
+    setBanner(null);
 
     setPaused(
       false,
@@ -2335,13 +2422,7 @@ export default function PlayerScreen({
       0,
     );
 
-    setCurrentTime(
-      0,
-    );
-
-    setPlayableDuration(
-      0,
-    );
+    progress.reset();
 
     setLoading(
       true,
@@ -2424,12 +2505,14 @@ export default function PlayerScreen({
         0,
       );
 
-      setCurrentTime(
-        0,
+      progress.reset();
+
+      setErrorInfo(
+        null,
       );
 
-      setPlayableDuration(
-        0,
+      setShowDiagnostics(
+        false,
       );
 
       setAudioTracks(
@@ -2517,7 +2600,7 @@ export default function PlayerScreen({
             duration,
             Math.max(
               0,
-              currentTime +
+              progress.get().currentTime +
                 seconds,
             ),
           );
@@ -2526,9 +2609,9 @@ export default function PlayerScreen({
           target,
         );
 
-        setCurrentTime(
-          target,
-        );
+        progress.set({
+          currentTime: target,
+        });
 
         setEnded(
           false,
@@ -2537,8 +2620,8 @@ export default function PlayerScreen({
         wakeControls();
       },
       [
-        currentTime,
         duration,
+        progress,
         wakeControls,
       ],
     );
@@ -2556,9 +2639,9 @@ export default function PlayerScreen({
           0,
         );
 
-        setCurrentTime(
-          0,
-        );
+        progress.set({
+          currentTime: 0,
+        });
 
         setEnded(
           false,
@@ -2615,17 +2698,32 @@ export default function PlayerScreen({
       (
         data: VideoProgressEvent,
       ) => {
-        setCurrentTime(
-          data.currentTime ||
-            0,
-        );
+        const position =
+          data.currentTime || 0;
 
-        setPlayableDuration(
-          data.playableDuration ||
-            0,
-        );
+        progress.set({
+          currentTime: position,
+          playableDuration:
+            data.playableDuration || 0,
+        });
+
+        const now = Date.now();
+
+        if (
+          durationRef.current > 0 &&
+          now - lastSaveAtRef.current >
+            RESUME_SAVE_INTERVAL_MS
+        ) {
+          lastSaveAtRef.current = now;
+          recordProgress(
+            playbackChannelRef.current,
+            position,
+            durationRef.current,
+            resumeParentRef.current,
+          );
+        }
       },
-      [],
+      [progress],
     );
 
   const handleLoad =
@@ -2754,9 +2852,54 @@ export default function PlayerScreen({
           },
         );
 
+        const resumeAt =
+          nextDuration > 0
+            ? getResumePosition(
+                playbackChannelRef.current,
+              )
+            : 0;
+
+        if (
+          resumeAt > 0 &&
+          videoRef.current
+        ) {
+          videoRef.current.seek(
+            resumeAt,
+          );
+
+          progress.set({
+            currentTime: resumeAt,
+          });
+
+          setResumeNotice(
+            formatClock(resumeAt),
+          );
+        }
+
+        if (
+          suppressWakeRef.current
+        ) {
+          // Channel switch: keep the picture clean, just let the banner settle.
+          suppressWakeRef.current =
+            false;
+
+          if (bannerTimerRef.current) {
+            clearTimeout(bannerTimerRef.current);
+          }
+
+          bannerTimerRef.current =
+            setTimeout(
+              () => setBanner(null),
+              ZAP_BANNER_MS,
+            );
+
+          return;
+        }
+
         wakeControls();
       },
       [
+        progress,
         wakeControls,
       ],
     );
@@ -2817,33 +2960,22 @@ export default function PlayerScreen({
       (
         data: VideoErrorEvent,
       ) => {
-        let message =
-          'تعذر تشغيل هذا المحتوى.';
+        const info =
+          describePlaybackError(
+            data as any,
+            ar,
+          );
 
-        if (
-          data?.error
-        ) {
-          try {
-            const raw =
-              JSON.stringify(
-                data.error,
-              );
+        setErrorInfo(
+          info,
+        );
 
-            if (
-              raw &&
-              raw.length >
-                0
-            ) {
-              message =
-                `تعذر تشغيل المحتوى.\n${raw}`;
-            }
-          } catch {
-            // Keep default message.
-          }
-        }
+        setShowDiagnostics(
+          false,
+        );
 
         setError(
-          message,
+          info.message,
         );
 
         setLoading(
@@ -2861,6 +2993,7 @@ export default function PlayerScreen({
         wakeControls();
       },
       [
+        ar,
         wakeControls,
       ],
     );
@@ -2880,6 +3013,13 @@ export default function PlayerScreen({
   const handleEnd =
     useCallback(
       () => {
+        recordProgress(
+          playbackChannelRef.current,
+          durationRef.current,
+          durationRef.current,
+          resumeParentRef.current,
+        );
+
         setEnded(
           true,
         );
@@ -2898,6 +3038,139 @@ export default function PlayerScreen({
         clearHideTimer,
       ],
     );
+
+  useEffect(() => {
+    void ensureContinueWatchingLoaded();
+  }, []);
+
+  // Save the final position when leaving an item (back, episode change, zap).
+  useEffect(() => {
+    const item = playbackChannel;
+    const parent = resumeParentRef.current;
+
+    return () => {
+      const position = progress.get().currentTime;
+
+      if (durationRef.current > 0 && position > 0) {
+        recordProgress(item, position, durationRef.current, parent);
+      }
+    };
+  }, [playbackChannel, progress]);
+
+  useEffect(() => {
+    if (!resumeNotice) return;
+    const timer = setTimeout(() => setResumeNotice(null), 4000);
+    return () => clearTimeout(timer);
+  }, [resumeNotice]);
+
+  useEffect(
+    () => () => {
+      if (zapTimerRef.current) clearTimeout(zapTimerRef.current);
+      if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
+    },
+    [],
+  );
+
+  const zap =
+    useCallback(
+      (delta: 1 | -1) => {
+        const queue = liveQueue || [];
+
+        if (!canZap) {
+          return;
+        }
+
+        const current = zappedChannel || channel;
+        const currentIndex = queue.findIndex(item => item.id === current.id);
+        const from = zapTargetRef.current ?? currentIndex;
+
+        // Opened channel missing from the queue: enter at the matching end.
+        const target =
+          from < 0
+            ? (delta > 0 ? 0 : queue.length - 1)
+            : from + delta;
+
+        if (bannerTimerRef.current) {
+          clearTimeout(bannerTimerRef.current);
+        }
+
+        if (target < 0 || target >= queue.length) {
+          // No wrap-around: stay on the current channel and say why.
+          const edgeIndex = Math.max(0, Math.min(queue.length - 1, from));
+          setBanner({
+            channel: queue[edgeIndex] || current,
+            number: edgeIndex + 1,
+            total: queue.length,
+            pending: false,
+            edge: target < 0 ? 'first' : 'last',
+          });
+          bannerTimerRef.current = setTimeout(() => setBanner(null), ZAP_BANNER_MS);
+          return;
+        }
+
+        zapTargetRef.current = target;
+
+        setBanner({
+          channel: queue[target],
+          number: target + 1,
+          total: queue.length,
+          pending: true,
+        });
+
+        if (zapTimerRef.current) {
+          clearTimeout(zapTimerRef.current);
+        }
+
+        zapTimerRef.current = setTimeout(() => {
+          zapTimerRef.current = null;
+          const index = zapTargetRef.current;
+          zapTargetRef.current = null;
+
+          if (index === null) {
+            return;
+          }
+
+          const next = queue[index];
+
+          suppressWakeRef.current = true;
+          clearHideTimer();
+          setShowControls(false);
+          setMenu(null);
+          setZappedChannel(next.id === channel.id ? null : next);
+          setBanner(value => (value ? { ...value, pending: false } : value));
+          bannerTimerRef.current = setTimeout(() => setBanner(null), ZAP_BANNER_MS * 3);
+        }, ZAP_COMMIT_MS);
+      },
+      [canZap, channel, clearHideTimer, liveQueue, zappedChannel],
+    );
+
+  const showControlsRef = useRef(showControls);
+  showControlsRef.current = showControls;
+  const menuRef = useRef(menu);
+  menuRef.current = menu;
+
+  useTVEventHandler(
+    useCallback(
+      evt => {
+        if (!evt || evt.eventKeyAction === 1 || !canZap || menuRef.current) {
+          return;
+        }
+
+        // Dedicated channel keys always zap (CH+ = next, CH- = previous).
+        if (evt.eventType === 'channelUp' || evt.eventType === 'channelDown') {
+          zap(evt.eventType === 'channelUp' ? 1 : -1);
+          return;
+        }
+
+        // D-pad UP/DOWN zap only while the control panel is hidden; when it is
+        // visible they move focus between controls as usual.
+        if (!showControlsRef.current && (evt.eventType === 'up' || evt.eventType === 'down')) {
+          zap(evt.eventType === 'up' ? -1 : 1);
+        }
+      },
+      [canZap, zap],
+    ),
+  );
 
   if (
     isMovieDetails
@@ -3180,72 +3453,37 @@ export default function PlayerScreen({
                       styles.progressSection
                     }
                   >
-                    <View
-                      style={
-                        styles.timeRow
-                      }
-                    >
-                      <Text
-                        style={
-                          styles.timeText
-                        }
-                      >
-                        {formatTime(
-                          currentTime,
-                        )}
-                      </Text>
-
-                      <Text
-                        style={
-                          styles.timeText
-                        }
-                      >
-                        {formatTime(
-                          duration,
-                        )}
-                      </Text>
-                    </View>
-
-                    <View
-                      style={
-                        styles.progressTrack
-                      }
-                    >
-                      <View
-                        style={[
-                          styles.bufferedTrack,
-                          {
-                            width: `${bufferedRatio * 100}%`,
-                          },
-                        ]}
-                      />
-
-                      <View
-                        style={[
-                          styles.progressFill,
-                          {
-                            width: `${progressRatio * 100}%`,
-                          },
-                        ]}
-                      />
-
-                      <View
-                        style={[
-                          styles.progressThumb,
-                          {
-                            left: `${progressRatio * 100}%`,
-                          },
-                        ]}
-                      />
-                    </View>
+                    <SeekBar
+                      store={progress}
+                      duration={duration}
+                      accessibilityLabel={ar ? 'شريط التقدم' : 'Playback position'}
+                      onActivity={wakeControls}
+                      onScrubbingChange={setScrubbing}
+                      onSeek={target => {
+                        videoRef.current?.seek(target);
+                        progress.set({ currentTime: target });
+                        setEnded(false);
+                        wakeControls();
+                      }}
+                    />
                   </View>
                 )}
 
                 <View
-                  style={
-                    styles.controlsRow
-                  }
+                  style={[
+                    styles.controlsRow,
+                    { flexDirection: ar ? 'row-reverse' : 'row' },
+                  ]}
                 >
+                  {canZap ? (
+                    <ControlButton
+                      icon="▲"
+                      label={ar ? 'القناة السابقة' : 'Previous channel'}
+                      onPress={() => zap(-1)}
+                      large
+                    />
+                  ) : null}
+
                   <ControlButton
                     icon={
                       paused
@@ -3261,6 +3499,15 @@ export default function PlayerScreen({
                       togglePlay
                     }
                   />
+
+                  {canZap ? (
+                    <ControlButton
+                      icon="▼"
+                      label={ar ? 'القناة التالية' : 'Next channel'}
+                      onPress={() => zap(1)}
+                      large
+                    />
+                  ) : null}
 
                   <ControlButton
                     icon="↶"
@@ -3341,9 +3588,10 @@ export default function PlayerScreen({
                   <ControlButton
                     icon="⛶"
                     label="ملء الشاشة"
-                    onPress={
-                      wakeControls
-                    }
+                    onPress={() => {
+                      clearHideTimer();
+                      setShowControls(false);
+                    }}
                     compact
                   />
 
@@ -3361,9 +3609,27 @@ export default function PlayerScreen({
           </>
         )}
 
+      <ChannelBanner
+        state={banner}
+        loading={loading}
+        ar={ar}
+      />
+
+      {resumeNotice && !error ? (
+        <View
+          pointerEvents="none"
+          style={[styles.resumeNotice, ar ? styles.resumeNoticeRtl : styles.resumeNoticeLtr]}
+        >
+          <Text style={styles.resumeNoticeText}>
+            {ar ? `استئناف من ${resumeNotice}` : `Resuming from ${resumeNotice}`}
+          </Text>
+        </View>
+      ) : null}
+
       {loading &&
         !error &&
-        !ended && (
+        !ended &&
+        !banner && (
           <View
             style={
               styles.loadingOverlay
@@ -3441,6 +3707,27 @@ export default function PlayerScreen({
             >
               {error}
             </Text>
+
+            {errorInfo?.technical ? (
+              <Pressable
+                focusable
+                accessibilityRole="button"
+                onPress={() => setShowDiagnostics(value => !value)}
+                style={({ focused }) => [styles.diagnosticsToggle, focused && styles.diagnosticsToggleFocused]}
+              >
+                <Text style={styles.diagnosticsToggleText}>
+                  {showDiagnostics
+                    ? (ar ? 'إخفاء تفاصيل التشخيص' : 'Hide diagnostics')
+                    : (ar ? 'عرض تفاصيل التشخيص' : 'Show diagnostics')}
+                </Text>
+              </Pressable>
+            ) : null}
+
+            {showDiagnostics && errorInfo ? (
+              <Text selectable numberOfLines={6} style={styles.diagnosticsText}>
+                {playbackChannel.contentType.toUpperCase()} · {errorInfo.technical}
+              </Text>
+            ) : null}
 
             <View
               style={
@@ -3834,17 +4121,85 @@ const styles =
       paddingHorizontal: 16,
       paddingVertical: 10,
       borderRadius: 24,
-      flexDirection:
-        'row',
-      alignItems:
-        'center',
-      justifyContent:
-        'center',
-      backgroundColor:
-        'rgba(18, 24, 41, 0.94)',
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: 'rgba(10,18,40,0.82)',
+      borderWidth: 2,
+      borderColor: 'rgba(140,180,255,0.16)',
+    },
+
+    controlButtonLarge: {
+      minWidth: 132,
+      minHeight: 72,
+      borderRadius: 28,
+    },
+
+    controlIconBox: {
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+
+    controlIconGap: {
+      marginRight: 8,
+    },
+
+    flipX: {
+      transform: [{ scaleX: -1 }],
+    },
+
+    resumeNotice: {
+      position: 'absolute',
+      top: 36,
+      zIndex: 70,
+      height: 44,
+      paddingHorizontal: 18,
+      borderRadius: 22,
+      justifyContent: 'center',
+      backgroundColor: 'rgba(6,10,26,0.86)',
       borderWidth: 1,
-      borderColor:
-        'rgba(148, 163, 184, 0.10)',
+      borderColor: SHASHTNA_THEME.colors.borderStrong,
+    },
+
+    resumeNoticeLtr: { left: 40 },
+
+    resumeNoticeRtl: { right: 40 },
+
+    resumeNoticeText: {
+      color: '#FFFFFF',
+      fontSize: 15,
+      fontWeight: '800',
+    },
+
+    diagnosticsToggle: {
+      alignSelf: 'center',
+      marginTop: 12,
+      paddingHorizontal: 16,
+      height: 40,
+      borderRadius: 20,
+      justifyContent: 'center',
+      borderWidth: 2,
+      borderColor: 'transparent',
+    },
+
+    diagnosticsToggleFocused: {
+      borderColor: '#FFFFFF',
+      backgroundColor: 'rgba(255,255,255,0.08)',
+    },
+
+    diagnosticsToggleText: {
+      color: SHASHTNA_THEME.colors.primaryLight,
+      fontSize: 14,
+      fontWeight: '800',
+    },
+
+    diagnosticsText: {
+      marginTop: 8,
+      color: '#94A3B8',
+      fontSize: 12,
+      lineHeight: 18,
+      textAlign: 'left',
+      writingDirection: 'ltr',
     },
 
     controlButtonCompact: {
@@ -3855,22 +4210,14 @@ const styles =
 
     controlButtonFocused: {
       borderColor: '#FFFFFF',
-      backgroundColor: 'rgba(255,255,255,0.92)',
+      borderWidth: 2,
+      backgroundColor: SHASHTNA_THEME.colors.primary,
       transform: [
         {
           scale: 1.05,
         },
       ],
-      shadowColor: '#030810',
-      shadowOpacity:
-        0.7,
-      shadowRadius:
-        18,
-      shadowOffset: {
-        width: 0,
-        height: 0,
-      },
-      elevation: 14,
+      boxShadow: SHASHTNA_THEME.shadows.focusGlow,
     },
 
     controlButtonDisabled: {

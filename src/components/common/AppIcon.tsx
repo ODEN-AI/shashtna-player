@@ -11,7 +11,8 @@ export type AppIconName =
   | 'sliders' | 'eye' | 'subtitle' | 'edit' | 'clock' | 'logout' | 'crown'
   | 'close' | 'menu' | 'rewind' | 'forward' | 'pause' | 'fullscreen'
   | 'wifi'
-  | 'audio' | 'quality' | 'bookmark' | 'download' | 'filterReset' | 'sun' | 'moon';
+  | 'audio' | 'quality' | 'bookmark' | 'download' | 'filterReset' | 'sun' | 'moon'
+  | 'channelUp' | 'channelDown' | 'megaphone' | 'open';
 
 type Props = {
   name: AppIconName;
@@ -75,6 +76,10 @@ const ICONS: Record<AppIconName, string> = {
   sun: 'sunny-outline',
   moon: 'moon-outline',
   wifi: 'wifi-outline',
+  channelUp: 'chevron-up',
+  channelDown: 'chevron-down',
+  megaphone: 'megaphone-outline',
+  open: 'open-outline',
 };
 
 export default function AppIcon({
