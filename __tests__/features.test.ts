@@ -68,3 +68,26 @@ describe('playback errors', () => {
     expect(info.message).toMatch(/could not be played/);
   });
 });
+
+import { describeConnectionError, redactSecrets, ValidationError } from '../src/screens/Connection/connectionErrors';
+
+describe('connection errors', () => {
+  test('never leaks credentials in diagnostics', () => {
+    const raw = 'Network request failed for http://srv.example:8080/get.php?username=bob&password=s3cret&type=m3u_plus';
+    const info = describeConnectionError(new Error(raw), true);
+    expect(info.technical).not.toContain('s3cret');
+    expect(info.technical).not.toContain('bob');
+    expect(redactSecrets('http://h:1/series/alice/pw123/55.mkv')).toBe('http://h:1/…');
+    expect(info.message).toContain('تعذر الوصول');
+  });
+
+  test('validation errors are shown as-is without diagnostics', () => {
+    const info = describeConnectionError(new ValidationError('أكمل بياناتك'), true);
+    expect(info).toEqual({ message: 'أكمل بياناتك', technical: '' });
+  });
+});
+
+test('playback diagnostics are redacted too', () => {
+  const info = describePlaybackError({ error: { errorString: 'Source error http://srv:80/live/bob/s3cret/1.ts' } }, false);
+  expect(info.technical).not.toContain('s3cret');
+});

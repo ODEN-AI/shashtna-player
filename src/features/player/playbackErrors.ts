@@ -1,3 +1,5 @@
+import { redactSecrets } from '../../screens/Connection/connectionErrors';
+
 /**
  * Turns react-native-video / ExoPlayer errors into a short human message
  * plus a technical line kept for diagnostics.
@@ -14,10 +16,12 @@ export function describePlaybackError(raw: RawError, ar: boolean): PlaybackError
 
   let technical = '';
   try {
-    technical = JSON.stringify(error).slice(0, 400);
+    technical = JSON.stringify(error);
   } catch {
-    technical = text.slice(0, 400);
+    technical = text;
   }
+  // Stream URLs embed the subscription username/password.
+  technical = redactSecrets(technical).slice(0, 400);
 
   const pick = (arText: string, enText: string) => (ar ? arText : enText);
   let message = pick(

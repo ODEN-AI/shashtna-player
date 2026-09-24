@@ -2,27 +2,30 @@ import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
-  ImageBackground,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
-import {
-  M3UChannel,
-  buildXtreamM3UUrl,
-  downloadAndParseM3U,
-} from '../../lib/m3u';
-import { getTmdbMetadata, tmdbImageUrl } from '../../lib/tmdb';
-import { SHASHTNA_FONT, SHASHTNA_THEME } from '../../design/theme';
-import { BRAND, BRAND_ASSETS } from '../../design/brand';
+
+import AppIcon, { AppIconName } from '../../components/common/AppIcon';
+import { ShellBackground } from '../../app/AppShell';
 import { useAppPreferences } from '../../design/AppPreferencesContext';
-import AppIcon from '../../components/common/AppIcon';
+import { BRAND, BRAND_ASSETS } from '../../design/brand';
+import { useDeviceClass } from '../../design/device';
+import { focusStyle, Palette, usePalette } from '../../design/palette';
+import { SHASHTNA_FONT, SHASHTNA_THEME } from '../../design/theme';
+import { buildXtreamM3UUrl, downloadAndParseM3U, M3UChannel } from '../../lib/m3u';
+import { getTmdbMetadata, tmdbImageUrl } from '../../lib/tmdb';
+import { describeConnectionError, ValidationError } from './connectionErrors';
 
 type Props = {
   onConnected: (channels: M3UChannel[], source: string) => void;
 };
+
+type Mode = 'xtream' | 'm3u';
 
 async function checkNetworkConnection(): Promise<boolean> {
   const endpoints = [
@@ -34,11 +37,8 @@ async function checkNetworkConnection(): Promise<boolean> {
     try {
       const result = await Promise.race([
         fetch(url, { method: 'GET' }),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('timeout')), 4500),
-        ),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 4500)),
       ]);
-
       if (result && 'ok' in result && (result as Response).ok) {
         return true;
       }
@@ -50,56 +50,53 @@ async function checkNetworkConnection(): Promise<boolean> {
   return false;
 }
 
-function Feature({
-  icon,
-  title,
-  sub,
-}: {
-  icon: 'live' | 'movies' | 'series';
-  title: string;
-  sub: string;
-}) {
-  return (
-    <View style={styles.featureCard}>
-      <View style={styles.featureIcon}>
-        <AppIcon name={icon} size={23} color={SHASHTNA_THEME.colors.primaryBright} />
-      </View>
-      <Text style={styles.featureTitle}>{title}</Text>
-      <Text style={styles.featureSub}>{sub}</Text>
-    </View>
-  );
-}
+/** Artwork for the brand side (only shown when TMDB is configured). */
+const POSTER_SAMPLES: Array<{ name: string; type: 'movie' | 'series' }> = [
+  { name: 'Dune: Part Two', type: 'movie' },
+  { name: 'House of the Dragon', type: 'series' },
+  { name: 'The Last of Us', type: 'series' },
+];
 
+/**
+ * Sign-in / connection screen.
+ *
+ * Presentation rebuilt; the connection flow is unchanged: Xtream credentials
+ * are turned into the player's M3U URL by buildXtreamM3UUrl and loaded with
+ * downloadAndParseM3U. "M3U link" mode passes a playlist URL to the same
+ * loader (the same path used when restoring a saved source).
+ */
 export default function ConnectionScreen({ onConnected }: Props) {
-  const { language } = useAppPreferences();
+  const { language, setLanguage } = useAppPreferences();
   const ar = language === 'ar';
+  const palette = usePalette();
+  const device = useDeviceClass();
+  const compact = device === 'phone';
+  const rowDirection = ar ? 'row-reverse' : 'row';
 
+  const [mode, setMode] = useState<Mode>('xtream');
   const [server, setServer] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [playlistUrl, setPlaylistUrl] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [count, setCount] = useState(0);
-  const [error, setError] = useState('');
+  const [error, setError] = useState<{ message: string; technical: string } | null>(null);
+  const [showTechnical, setShowTechnical] = useState(false);
 
-  const [networkConnected, setNetworkConnected] = useState(false);
-  const [backdrops, setBackdrops] = useState<string[]>([]);
+  const [networkConnected, setNetworkConnected] = useState<boolean | null>(null);
+  const [posters, setPosters] = useState<string[]>([]);
 
   useEffect(() => {
     let alive = true;
-
-    const refreshNetworkStatus = async () => {
+    const refresh = async () => {
       const connected = await checkNetworkConnection();
-      if (alive) {
-        setNetworkConnected(connected);
-      }
+      if (alive) setNetworkConnected(connected);
     };
-
-    refreshNetworkStatus();
-    const interval = setInterval(refreshNetworkStatus, 10000);
-
+    refresh();
+    const interval = setInterval(refresh, 10000);
     return () => {
       alive = false;
       clearInterval(interval);
@@ -108,54 +105,17 @@ export default function ConnectionScreen({ onConnected }: Props) {
 
   useEffect(() => {
     let alive = true;
-
-    // خلفية سينمائية متنوعة: أفلام + مسلسلات + أنمي + رياضة.
-    // كل العناصر تُجلب من TMDB، لذلك تتغير جودة/توفر البوسترات حسب نتائج TMDB.
-    const samples: Array<{ name: string; type: 'movie' | 'series' }> = [
-      // Movies
-      { name: 'Dune: Part Two', type: 'movie' },
-      { name: 'The Batman', type: 'movie' },
-      { name: 'John Wick: Chapter 4', type: 'movie' },
-      { name: 'Oppenheimer', type: 'movie' },
-      { name: 'Top Gun: Maverick', type: 'movie' },
-      // Series
-      { name: 'The Last of Us', type: 'series' },
-      { name: 'House of the Dragon', type: 'series' },
-      { name: 'Wednesday', type: 'series' },
-      { name: 'Stranger Things', type: 'series' },
-      // Anime
-      { name: 'Demon Slayer: Kimetsu no Yaiba', type: 'series' },
-      { name: 'Jujutsu Kaisen', type: 'series' },
-      { name: 'One Piece', type: 'series' },
-      // Sports
-      { name: 'The Last Dance', type: 'series' },
-      { name: 'Formula 1: Drive to Survive', type: 'series' },
-      { name: 'All or Nothing: Arsenal', type: 'series' },
-      { name: 'Creed III', type: 'movie' },
-    ];
-
     Promise.all(
-      samples.map(async sample => {
-        const channel = {
-          id: `sample-${sample.name}`,
-          name: sample.name,
-          url: '',
-          logo: '',
-          group: '',
-          contentType: sample.type,
-        } as M3UChannel;
-
+      POSTER_SAMPLES.map(async sample => {
+        const channel = { id: `sample-${sample.name}`, name: sample.name, url: '', logo: '', group: '', contentType: sample.type } as M3UChannel;
         const metadata = await getTmdbMetadata(channel, sample.type);
-        return tmdbImageUrl(metadata?.posterPath, 'w500') || '';
+        return tmdbImageUrl(metadata?.posterPath, 'w342') || '';
       }),
     )
       .then(images => {
-        if (alive) {
-          setBackdrops(images.filter(Boolean));
-        }
+        if (alive) setPosters(images.filter(Boolean));
       })
       .catch(() => {});
-
     return () => {
       alive = false;
     };
@@ -164,813 +124,423 @@ export default function ConnectionScreen({ onConnected }: Props) {
   const connect = async () => {
     try {
       setLoading(true);
-      setError('');
+      setError(null);
+      setShowTechnical(false);
       setProgress(0);
       setCount(0);
 
-      const cleanServer = server.trim();
-      const cleanUsername = username.trim();
-      const cleanPassword = password;
-
-      if (!cleanServer || !cleanUsername || !cleanPassword) {
-        throw new Error(
-          ar
-            ? 'أكمل بيانات اشتراكك: السيرفر، اسم المستخدم، وكلمة المرور.'
-            : 'Enter your subscription server, username, and password.',
-        );
+      let source: string;
+      if (mode === 'xtream') {
+        const cleanServer = server.trim();
+        const cleanUsername = username.trim();
+        if (!cleanServer || !cleanUsername || !password) {
+          throw new ValidationError(
+            ar ? 'أكمل بيانات اشتراكك: السيرفر، اسم المستخدم، وكلمة المرور.' : 'Enter your server, username and password.',
+          );
+        }
+        source = buildXtreamM3UUrl(cleanServer, cleanUsername, password);
+      } else {
+        const url = playlistUrl.trim();
+        if (!/^https?:\/\//i.test(url)) {
+          throw new ValidationError(
+            ar ? 'أدخل رابط قائمة M3U كامل يبدأ بـ http:// أو https://' : 'Enter a full M3U playlist link starting with http:// or https://',
+          );
+        }
+        source = url;
       }
-
-      const source = buildXtreamM3UUrl(
-        cleanServer,
-        cleanUsername,
-        cleanPassword,
-      );
 
       const channels = await downloadAndParseM3U(
         source,
-        progressValue => setProgress(progressValue),
-        parsedCount => setCount(parsedCount),
+        value => setProgress(value),
+        parsed => setCount(parsed),
       );
 
       if (!channels.length) {
-        throw new Error(
-          ar
-            ? 'ما تم العثور على محتوى بالمصدر. تأكد من بيانات اشتراكك.'
-            : 'No content was found. Check your subscription details.',
+        throw new ValidationError(
+          ar ? 'ما تم العثور على محتوى بالمصدر. تأكد من بيانات اشتراكك.' : 'No content was found. Check your subscription details.',
         );
       }
 
       onConnected(channels, source);
     } catch (e) {
-      setError(
-        e instanceof Error
-          ? e.message
-          : ar
-            ? 'حدث خطأ أثناء تسجيل الدخول.'
-            : 'An error occurred while signing in.',
-      );
+      setError(describeConnectionError(e, ar));
     } finally {
       setLoading(false);
     }
   };
 
-  const statusColor = networkConnected
-    ? SHASHTNA_THEME.colors.success
-    : '#F05B68';
+  const statusColor =
+    networkConnected === null ? palette.muted : networkConnected ? SHASHTNA_THEME.colors.success : SHASHTNA_THEME.colors.danger;
+  const statusText =
+    networkConnected === null
+      ? ar ? 'جاري فحص الاتصال' : 'Checking connection'
+      : networkConnected
+        ? ar ? 'متصل بالإنترنت' : 'Online'
+        : ar ? 'لا يوجد اتصال' : 'Offline';
+
+  const presentation = (
+    <View style={[styles.presentation, compact && styles.presentationCompact, { alignItems: ar ? 'flex-end' : 'flex-start' }]}>
+      <View style={[styles.brandRow, { flexDirection: rowDirection }]}>
+        <Image source={BRAND_ASSETS.logo} style={[styles.logo, compact && styles.logoCompact]} />
+        <View style={{ alignItems: ar ? 'flex-end' : 'flex-start' }}>
+          <Text style={[styles.brandName, { color: palette.text }]}>{BRAND.nameInside}</Text>
+          <Text style={[styles.brandTag, { color: palette.accent.light }]}>{ar ? 'منصة ترفيهك على شاشة واحدة' : 'Your entertainment, one screen'}</Text>
+        </View>
+      </View>
+
+      {!compact ? (
+        <>
+          <Text style={[styles.headline, { color: palette.text, textAlign: ar ? 'right' : 'left' }]}>
+            {ar ? 'كل محتواك\nبمكان واحد' : 'Everything you watch,\nin one place'}
+          </Text>
+          <Text style={[styles.body, { color: palette.secondary, textAlign: ar ? 'right' : 'left' }]}>
+            {ar
+              ? 'قنوات مباشرة وأفلام ومسلسلات بتجربة واضحة وسريعة على التلفزيون والموبايل.'
+              : 'Live channels, movies and series in a clear, fast experience on TV and mobile.'}
+          </Text>
+          <View style={[styles.features, { flexDirection: rowDirection }]}>
+            <Feature icon="live" label={ar ? 'بث مباشر' : 'Live TV'} palette={palette} />
+            <Feature icon="movies" label={ar ? 'أفلام' : 'Movies'} palette={palette} />
+            <Feature icon="series" label={ar ? 'مسلسلات' : 'Series'} palette={palette} />
+          </View>
+          {posters.length >= 3 ? (
+            <View style={[styles.posterFan, { flexDirection: rowDirection }]} pointerEvents="none">
+              {posters.slice(0, 3).map((uri, i) => (
+                <Image
+                  key={uri}
+                  source={{ uri }}
+                  style={[styles.fanPoster, { transform: [{ rotate: `${(i - 1) * (ar ? -5 : 5)}deg` }], zIndex: i === 1 ? 2 : 1 }]}
+                />
+              ))}
+            </View>
+          ) : null}
+        </>
+      ) : null}
+    </View>
+  );
+
+  const form = (
+    <View style={[styles.card, compact && styles.cardCompact, { borderColor: palette.glassBorder, experimental_backgroundImage: palette.glass }]}>
+      <View style={[styles.cardTop, { flexDirection: rowDirection }]}>
+        <View style={[styles.status, { flexDirection: rowDirection, borderColor: palette.glassBorder }]}>
+          <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
+          <Text style={[styles.statusText, { color: palette.secondary }]}>{statusText}</Text>
+        </View>
+        <Pressable
+          focusable
+          accessibilityRole="button"
+          accessibilityLabel={ar ? 'Switch to English' : 'التبديل إلى العربية'}
+          onPress={() => setLanguage(ar ? 'en' : 'ar')}
+          style={({ focused, pressed }) => [
+            styles.langToggle,
+            { flexDirection: rowDirection, borderColor: palette.glassBorder },
+            focused && focusStyle(palette, SHASHTNA_THEME.focus.buttonScale),
+            pressed && styles.pressed,
+          ]}
+        >
+          <AppIcon name="language" size={16} color={palette.accent.light} />
+          <Text style={[styles.langText, { color: palette.text }]}>{ar ? 'English' : 'العربية'}</Text>
+        </Pressable>
+      </View>
+
+      <Text style={[styles.cardTitle, { color: palette.text, textAlign: ar ? 'right' : 'left' }]}>
+        {ar ? 'تسجيل الدخول' : 'Sign in'}
+      </Text>
+      <Text style={[styles.cardSub, { color: palette.muted, textAlign: ar ? 'right' : 'left' }]}>
+        {ar ? 'أدخل بيانات اشتراكك وابدأ المشاهدة فوراً.' : 'Enter your subscription details to start watching.'}
+      </Text>
+
+      <View style={[styles.segment, { flexDirection: rowDirection, borderColor: palette.glassBorder }]}>
+        <SegmentButton label="Xtream" active={mode === 'xtream'} onPress={() => setMode('xtream')} palette={palette} />
+        <SegmentButton label={ar ? 'رابط M3U' : 'M3U link'} active={mode === 'm3u'} onPress={() => setMode('m3u')} palette={palette} />
+      </View>
+
+      {mode === 'xtream' ? (
+        <>
+          <Field
+            label={ar ? 'رابط السيرفر' : 'Server URL'}
+            icon="link"
+            value={server}
+            onChangeText={setServer}
+            placeholder="http://server:port"
+            palette={palette}
+            ar={ar}
+            ltrValue
+            keyboardType="url"
+            preferred
+          />
+          <Field label={ar ? 'اسم المستخدم' : 'Username'} icon="user" value={username} onChangeText={setUsername} placeholder={ar ? 'اسم المستخدم' : 'Username'} palette={palette} ar={ar} ltrValue />
+          <Field
+            label={ar ? 'كلمة المرور' : 'Password'}
+            icon="settings"
+            value={password}
+            onChangeText={setPassword}
+            placeholder={ar ? 'كلمة المرور' : 'Password'}
+            palette={palette}
+            ar={ar}
+            ltrValue
+            secure={!showPassword}
+            accessory={
+              <Pressable
+                focusable
+                accessibilityRole="button"
+                accessibilityLabel={showPassword ? (ar ? 'إخفاء كلمة المرور' : 'Hide password') : ar ? 'إظهار كلمة المرور' : 'Show password'}
+                onPress={() => setShowPassword(v => !v)}
+                style={({ focused }) => [styles.eye, focused && { backgroundColor: palette.accent.soft, borderColor: palette.focus }]}
+              >
+                <AppIcon name="eye" size={18} color={showPassword ? palette.accent.light : palette.muted} />
+              </Pressable>
+            }
+          />
+        </>
+      ) : (
+        <Field
+          label={ar ? 'رابط قائمة M3U' : 'M3U playlist URL'}
+          icon="link"
+          value={playlistUrl}
+          onChangeText={setPlaylistUrl}
+          placeholder="https://example.com/playlist.m3u"
+          palette={palette}
+          ar={ar}
+          ltrValue
+          keyboardType="url"
+          preferred
+        />
+      )}
+
+      <Pressable
+        focusable
+        disabled={loading}
+        accessibilityRole="button"
+        onPress={connect}
+        style={({ focused, pressed }) => [
+          styles.connect,
+          { flexDirection: rowDirection, experimental_backgroundImage: palette.accent.gradient, boxShadow: palette.accent.buttonShadow },
+          loading && styles.connectLoading,
+          focused && focusStyle(palette, SHASHTNA_THEME.focus.buttonScale),
+          pressed && styles.pressed,
+        ]}
+      >
+        {loading ? <ActivityIndicator color="#FFFFFF" /> : <AppIcon name="play" size={18} color="#FFFFFF" />}
+        <Text style={styles.connectText}>
+          {loading ? (ar ? 'جاري تحميل المحتوى...' : 'Loading content...') : ar ? 'دخول' : 'Sign in'}
+        </Text>
+      </Pressable>
+
+      {loading ? (
+        <View style={styles.progressWrap}>
+          <View style={[styles.progressTrack, { backgroundColor: palette.surfaceHover }]}>
+            <View style={[styles.progressFill, { width: `${Math.max(4, Math.min(100, progress))}%`, backgroundColor: palette.accent.bright }]} />
+          </View>
+          <Text style={[styles.progressText, { color: palette.muted, textAlign: ar ? 'right' : 'left' }]}>
+            {ar ? `تم تجهيز ${count.toLocaleString('ar-IQ')} عنصر` : `${count.toLocaleString('en-US')} items ready`}
+          </Text>
+        </View>
+      ) : null}
+
+      {error ? (
+        <View style={[styles.error, { flexDirection: rowDirection }]}>
+          <AppIcon name="info" size={18} color={SHASHTNA_THEME.colors.danger} />
+          <View style={styles.errorCopy}>
+            <Text style={[styles.errorTitle, { textAlign: ar ? 'right' : 'left' }]}>{ar ? 'تعذر تسجيل الدخول' : 'Sign-in failed'}</Text>
+            <Text style={[styles.errorBody, { color: palette.secondary, textAlign: ar ? 'right' : 'left' }]}>{error.message}</Text>
+            {error.technical ? (
+              <Pressable focusable onPress={() => setShowTechnical(v => !v)} style={({ focused }) => [styles.techToggle, focused && { borderColor: palette.focus }]}>
+                <Text style={[styles.techToggleText, { color: palette.accent.light, textAlign: ar ? 'right' : 'left' }]}>
+                  {showTechnical ? (ar ? 'إخفاء التفاصيل' : 'Hide details') : ar ? 'تفاصيل التشخيص' : 'Diagnostics'}
+                </Text>
+              </Pressable>
+            ) : null}
+            {showTechnical ? <Text style={[styles.techText, { color: palette.muted }]}>{error.technical}</Text> : null}
+          </View>
+        </View>
+      ) : null}
+
+      <Text style={[styles.note, { color: palette.muted, textAlign: ar ? 'right' : 'left' }]}>
+        {ar ? 'تحتاج اشتراكاً فعّالاً من مزود الخدمة. بياناتك تبقى على جهازك.' : 'An active subscription is required. Your details stay on this device.'}
+      </Text>
+    </View>
+  );
 
   return (
-    <View style={styles.screen}>
-      <View style={styles.mediaWall}>
-        <View style={styles.mediaWallTrack}>
-          {backdrops.map((uri, index) => {
-            const column = index % 4;
-            const row = Math.floor(index / 4);
-            const rowTilt = row === 0 ? -5 : row === 1 ? 0 : 5;
-            const columnShift = column === 0 ? -2 : column === 3 ? 2 : 0;
-
-            return (
-              <ImageBackground
-                key={`${uri}-${index}`}
-                source={{ uri }}
-                style={[
-                  styles.wallPoster,
-                  {
-                    left: `${column * 24 + columnShift}%`,
-                    top: `${row * 34 + 1}%`,
-                    transform: [{ rotate: `${rowTilt + (column % 2 ? 1 : -1)}deg` }],
-                  },
-                ]}
-                imageStyle={styles.wallPosterImage}
-              />
-            );
-          })}
+    <View style={[styles.screen, { backgroundColor: palette.canvas }]}>
+      {palette.mode === 'dark' ? (
+        <>
+          <ShellBackground />
+          <View style={[StyleSheet.absoluteFill, styles.scrim]} />
+        </>
+      ) : null}
+      <ScrollView
+        contentContainerStyle={[styles.scroll, compact && styles.scrollCompact]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={[styles.layout, { flexDirection: compact ? 'column' : rowDirection }]}>
+          {presentation}
+          {form}
         </View>
-      </View>
+        <Text style={[styles.credit, { color: palette.muted }]}>{ar ? 'تصميم عبدالرحمن عامر' : 'Design by Abdulrahman Amer'}</Text>
+      </ScrollView>
+    </View>
+  );
+}
 
-      <View style={styles.backgroundTint} />
-      <View style={styles.leftVignette} />
-      <View style={styles.backgroundGlow} />
+function Feature({ icon, label, palette }: { icon: AppIconName; label: string; palette: Palette }) {
+  return (
+    <View style={[styles.feature, { borderColor: palette.glassBorder, experimental_backgroundImage: palette.glass }]}>
+      <AppIcon name={icon} size={18} color={palette.accent.light} />
+      <Text style={[styles.featureText, { color: palette.text }]}>{label}</Text>
+    </View>
+  );
+}
 
-      <View style={styles.topbar}>
-        <View style={styles.brand}>
-          <View style={styles.brandLogoFrame}>
-            <Image source={BRAND_ASSETS.logo} style={styles.brandLogoImage} />
-          </View>
+function SegmentButton({ label, active, onPress, palette }: { label: string; active: boolean; onPress: () => void; palette: Palette }) {
+  return (
+    <Pressable
+      focusable
+      accessibilityRole="tab"
+      accessibilityState={{ selected: active }}
+      onPress={onPress}
+      style={({ focused, pressed }) => [
+        styles.segmentButton,
+        active && { experimental_backgroundImage: palette.accent.gradient },
+        focused && { borderColor: palette.focus, boxShadow: palette.accent.focusShadow },
+        pressed && styles.pressed,
+      ]}
+    >
+      <Text style={[styles.segmentText, { color: active ? '#FFFFFF' : palette.secondary }]}>{label}</Text>
+    </Pressable>
+  );
+}
 
-          <View style={styles.brandCopy}>
-            <Text style={styles.brandArabic}>{BRAND.nameArabic}</Text>
-            <Text style={styles.brandLatin}>PLAYER</Text>
-            <Text style={styles.brandDescriptor}>
-              {ar ? 'منصة ترفيهك على شاشة واحدة' : 'Your entertainment, one screen'}
-            </Text>
-          </View>
-        </View>
-
-        <View style={styles.topActions}>
-          <View style={styles.languagePill}>
-            <AppIcon name="language" size={19} color={SHASHTNA_THEME.colors.primaryBright} />
-            <Text style={styles.pillText}>{ar ? 'العربية' : 'English'}</Text>
-          </View>
-
-          <View
-            style={[
-              styles.statusPill,
-              {
-                borderColor: statusColor,
-                backgroundColor: networkConnected
-                  ? 'rgba(24, 197, 132, 0.10)'
-                  : 'rgba(240, 91, 104, 0.10)',
-              },
-            ]}
-          >
-            <AppIcon name="wifi" size={19} color={statusColor} />
-            <Text style={styles.statusText}>
-              {networkConnected ? (ar ? 'متصل' : 'Connected') : (ar ? 'غير متصل' : 'Offline')}
-            </Text>
-            <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
-          </View>
-        </View>
-      </View>
-
-      <View style={styles.main}>
-        <View style={styles.left}>
-          <Text style={styles.kicker}>MORE THAN ENTERTAINMENT</Text>
-
-          <Text style={styles.heroTitle}>
-            كل محتواك{'\n'}
-            <Text style={styles.heroBlue}>بمكان واحد</Text>
-          </Text>
-
-          <Text style={styles.heroBody}>
-            {ar
-              ? 'شاهد القنوات المباشرة والأفلام والمسلسلات بجودة عالية وتجربة سهلة على شاشتك.'
-              : 'Watch live channels, movies and series with a clean, simple viewing experience.'}
-          </Text>
-
-          <View style={styles.featureRow}>
-            <Feature
-              icon="live"
-              title={ar ? 'قنوات مباشرة' : 'Live TV'}
-              sub={ar ? 'مباريات · أخبار · ترفيه' : 'Sports · News · Entertainment'}
-            />
-            <Feature
-              icon="movies"
-              title={ar ? 'أفلام متنوعة' : 'Movies'}
-              sub={ar ? 'أحدث وأفضل الأفلام' : 'Latest and popular'}
-            />
-            <Feature
-              icon="series"
-              title={ar ? 'مسلسلات مميزة' : 'Series'}
-              sub={ar ? 'محلية وعالمية' : 'Local and global'}
-            />
-          </View>
-
-          <View style={styles.designerCredit}>
-            <View style={styles.creditLine} />
-            <Text style={styles.creditText}>
-              {ar ? 'تصميم عبدالرحمن عامر' : 'DESIGN BY ABDULRAHMAN AMER'}
-            </Text>
-            <View style={styles.creditLine} />
-          </View>
-        </View>
-
-        <View style={styles.panel}>
-          <View style={styles.panelHeader}>
-            <View style={styles.linkBadge}>
-              <AppIcon name="source" size={24} color={SHASHTNA_THEME.colors.primaryBright} />
-            </View>
-
-            <View style={styles.panelHeaderCopy}>
-              <Text style={styles.eyebrow}>{BRAND.nameLatin.toUpperCase()}</Text>
-              <Text style={styles.panelTitle}>
-                {ar ? 'أدخل البيانات الخاصة باشتراكك' : 'Enter your subscription details'}
-              </Text>
-              <Text style={styles.panelSub}>
-                {ar
-                  ? 'سجل الدخول وابدأ المشاهدة فوراً'
-                  : 'Sign in and start watching instantly'}
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.serviceCard}>
-            <View style={styles.serviceIcon}>
-              <AppIcon name="source" size={25} color={SHASHTNA_THEME.colors.primaryBright} />
-            </View>
-
-            <View style={styles.serviceCopy}>
-              <Text style={styles.serviceTitle}>IPTV</Text>
-              <Text style={styles.serviceSub}>
-                {ar ? 'بيانات السيرفر الخاصة باشتراكك' : 'Your IPTV subscription credentials'}
-              </Text>
-            </View>
-
-            <View style={styles.serviceCheck}>
-              <AppIcon name="check" size={18} color="#FFFFFF" />
-            </View>
-          </View>
-
-          <View style={styles.form}>
-            <View style={styles.inputBlock}>
-              <Text style={styles.label}>{ar ? 'رابط السيرفر' : 'Server URL'}</Text>
-              <View style={styles.inputWrap}>
-                <AppIcon name="source" size={20} color={SHASHTNA_THEME.colors.primaryBright} />
-                <TextInput
-                  value={server}
-                  onChangeText={setServer}
-                  placeholder="http://server:port"
-                  placeholderTextColor={SHASHTNA_THEME.colors.textMuted}
-                  style={styles.input}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  keyboardType="url"
-                />
-              </View>
-            </View>
-
-            <View style={styles.inputBlock}>
-              <Text style={styles.label}>{ar ? 'اسم المستخدم' : 'Username'}</Text>
-              <View style={styles.inputWrap}>
-                <AppIcon name="user" size={20} color={SHASHTNA_THEME.colors.primaryBright} />
-                <TextInput
-                  value={username}
-                  onChangeText={setUsername}
-                  placeholder={ar ? 'اسم المستخدم' : 'Username'}
-                  placeholderTextColor={SHASHTNA_THEME.colors.textMuted}
-                  style={styles.input}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                />
-              </View>
-            </View>
-
-            <View style={styles.inputBlock}>
-              <Text style={styles.label}>{ar ? 'كلمة المرور' : 'Password'}</Text>
-              <View style={styles.inputWrap}>
-                <AppIcon name="settings" size={20} color={SHASHTNA_THEME.colors.primaryBright} />
-                <TextInput
-                  value={password}
-                  onChangeText={setPassword}
-                  placeholder={ar ? 'كلمة المرور' : 'Password'}
-                  placeholderTextColor={SHASHTNA_THEME.colors.textMuted}
-                  style={styles.input}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  secureTextEntry={!showPassword}
-                />
-                <Pressable
-                  focusable
-                  accessibilityRole="button"
-                  accessibilityLabel={ar ? 'إظهار كلمة المرور' : 'Show password'}
-                  onPress={() => setShowPassword(value => !value)}
-                  style={styles.passwordToggle}
-                >
-                  <AppIcon
-                    name="eye"
-                    size={19}
-                    color={SHASHTNA_THEME.colors.textSecondary}
-                  />
-                </Pressable>
-              </View>
-            </View>
-          </View>
-
-          <Pressable
-            focusable
-            hasTVPreferredFocus
-            disabled={loading}
-            onPress={connect}
-            style={({ focused, pressed }) => [
-              styles.connect,
-              focused && styles.connectFocus,
-              pressed && styles.connectPressed,
-            ]}
-          >
-            {loading ? (
-              <ActivityIndicator color="#FFFFFF" />
-            ) : (
-              <AppIcon name="play" size={18} color="#FFFFFF" />
-            )}
-
-            <Text style={styles.connectText}>
-              {loading
-                ? `${ar ? 'جاري تسجيل الدخول...' : 'Signing in...'} ${progress}%`
-                : ar
-                  ? 'تسجيل الدخول وتشغيل'
-                  : 'Sign In & Play'}
-            </Text>
-          </Pressable>
-
-          {loading ? (
-            <View style={styles.progressBox}>
-              <View style={[styles.progressBar, { width: `${progress}%` }]} />
-              <Text style={styles.progressText}>{count} عنصر</Text>
-            </View>
-          ) : null}
-
-          {error ? (
-            <View style={styles.error}>
-              <View style={styles.errorIcon}>
-                <AppIcon name="info" size={17} color="#F05B68" />
-              </View>
-              <View style={styles.errorCopy}>
-                <Text style={styles.errorTitle}>
-                  {ar ? 'تعذر تسجيل الدخول' : 'Sign-in failed'}
-                </Text>
-                <Text style={styles.errorBody}>{error}</Text>
-              </View>
-            </View>
-          ) : null}
-
-          <Text style={styles.note}>
-            {ar
-              ? 'تأكد من إدخال بيانات اشتراكك بشكل صحيح. تحتاج إلى اشتراك فعال من مزود الخدمة.'
-              : 'Enter valid subscription details. An active subscription is required.'}
-          </Text>
-        </View>
+function Field({
+  label,
+  icon,
+  value,
+  onChangeText,
+  placeholder,
+  palette,
+  ar,
+  ltrValue = false,
+  secure = false,
+  keyboardType,
+  accessory,
+  preferred = false,
+}: {
+  label: string;
+  icon: AppIconName;
+  value: string;
+  onChangeText: (value: string) => void;
+  placeholder: string;
+  palette: Palette;
+  ar: boolean;
+  /** URLs, usernames and passwords are typed left-to-right in both languages. */
+  ltrValue?: boolean;
+  secure?: boolean;
+  keyboardType?: 'default' | 'url';
+  accessory?: React.ReactNode;
+  preferred?: boolean;
+}) {
+  const [focused, setFocused] = useState(false);
+  return (
+    <View style={styles.field}>
+      <Text style={[styles.fieldLabel, { color: palette.secondary, textAlign: ar ? 'right' : 'left' }]}>{label}</Text>
+      <View
+        style={[
+          styles.inputWrap,
+          { flexDirection: ar ? 'row-reverse' : 'row', borderColor: focused ? palette.focus : palette.glassBorder, backgroundColor: palette.surfaceHover },
+          focused && { boxShadow: palette.accent.focusShadow },
+        ]}
+      >
+        <AppIcon name={icon} size={18} color={focused ? palette.accent.light : palette.muted} />
+        <TextInput
+          hasTVPreferredFocus={preferred}
+          value={value}
+          onChangeText={onChangeText}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          placeholder={placeholder}
+          placeholderTextColor={palette.muted}
+          secureTextEntry={secure}
+          autoCapitalize="none"
+          autoCorrect={false}
+          keyboardType={keyboardType === 'url' ? 'url' : 'default'}
+          style={[
+            styles.input,
+            { color: palette.text },
+            ltrValue ? styles.ltrInput : { textAlign: ar ? 'right' : 'left' },
+          ]}
+        />
+        {accessory}
       </View>
     </View>
   );
 }
 
+const T = SHASHTNA_THEME.typography;
+
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: SHASHTNA_THEME.colors.background,
-    overflow: 'hidden',
-  },
-  mediaWall: {
-    position: 'absolute',
-    left: 0,
-    top: 72,
-    width: '65%',
-    bottom: 0,
-    overflow: 'hidden',
-    opacity: 0.92,
-  },
-  mediaWallTrack: {
-    position: 'absolute',
-    left: '-5%',
-    top: '2%',
-    width: '112%',
-    height: '96%',
-  },
-  wallPoster: {
-    position: 'absolute',
-    width: '23%',
-    height: '31%',
-    borderRadius: 12,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(126, 201, 255, 0.22)',
-    backgroundColor: '#071525',
-    shadowColor: '#000000',
-    shadowOpacity: 0.35,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 6,
-  },
-  wallPosterImage: {
-    width: '100%',
-    height: '100%',
-    resizeMode: 'cover',
-  },
-  backgroundTint: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#04101D',
-    opacity: 0.58,
-  },
-  leftVignette: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-    width: '57%',
-    backgroundColor: 'rgba(2, 10, 20, 0.42)',
-  },
-  backgroundGlow: {
-    position: 'absolute',
-    width: 720,
-    height: 720,
-    borderRadius: 360,
-    right: -250,
-    top: -260,
-    backgroundColor: SHASHTNA_THEME.colors.primary,
-    opacity: 0.10,
-  },
-  topbar: {
-    height: 88,
-    paddingHorizontal: 34,
-    paddingTop: 10,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    zIndex: 2,
-  },
-  brand: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  brandLogoFrame: {
-    width: 54,
-    height: 54,
-    borderRadius: 16,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(91, 190, 255, 0.70)',
-    backgroundColor: '#0B2D58',
-    shadowColor: SHASHTNA_THEME.colors.primary,
-    shadowOpacity: 0.28,
-    shadowRadius: 12,
-    elevation: 8,
-  },
-  brandLogoImage: {
-    width: '100%',
-    height: '100%',
-  },
-  brandMark: {
-    color: '#FFFFFF',
-    fontSize: 21,
-    lineHeight: 54,
-    textAlign: 'center',
-    fontWeight: '900',
-    letterSpacing: 1,
-  },
-  brandCopy: {
-    marginLeft: 13,
-    marginTop: -4,
-  },
-  brandArabic: {
-    color: '#FFFFFF',
-    fontSize: 31,
-    lineHeight: 35,
-    fontWeight: '900',
-    fontFamily: SHASHTNA_FONT.display,
-  },
-  brandLatin: {
-    color: SHASHTNA_THEME.colors.primaryBright,
-    fontSize: 10,
-    letterSpacing: 3,
-    fontWeight: '900',
-    marginTop: -1,
-  },
-  brandDescriptor: {
-    color: SHASHTNA_THEME.colors.textMuted,
-    fontSize: 8,
-    marginTop: 4,
-  },
-  topActions: {
-    flexDirection: 'row',
-    gap: 10,
-    paddingTop: 2,
-  },
-  languagePill: {
-    height: 44,
-    paddingHorizontal: 16,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: SHASHTNA_THEME.colors.borderStrong,
-    backgroundColor: SHASHTNA_THEME.colors.glassSoft,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 9,
-  },
-  pillText: {
-    color: SHASHTNA_THEME.colors.textPrimary,
-    fontSize: 13,
-    fontFamily: SHASHTNA_FONT.sans,
-  },
-  statusPill: {
-    height: 44,
-    minWidth: 122,
-    paddingHorizontal: 15,
-    borderRadius: 14,
-    borderWidth: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  statusText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontFamily: SHASHTNA_FONT.sans,
-    fontWeight: '800',
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  main: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 30,
-    paddingHorizontal: 34,
-    paddingBottom: 26,
-  },
-  left: {
-    flex: 1,
-    maxWidth: 600,
-    paddingRight: 18,
-    marginTop: -12,
-    zIndex: 2,
-  },
-  kicker: {
-    color: SHASHTNA_THEME.colors.primaryBright,
-    fontSize: 11,
-    letterSpacing: 2.4,
-    fontWeight: '800',
-  },
-  heroTitle: {
-    marginTop: 10,
-    color: '#FFFFFF',
-    fontSize: 46,
-    lineHeight: 56,
-    fontWeight: '900',
-    fontFamily: SHASHTNA_FONT.display,
-  },
-  heroBlue: {
-    color: SHASHTNA_THEME.colors.primaryBright,
-  },
-  heroBody: {
-    marginTop: 15,
-    maxWidth: 500,
-    color: '#D4E1ED',
-    fontSize: 14,
-    lineHeight: 22,
-    fontFamily: SHASHTNA_FONT.sans,
-  },
-  featureRow: {
-    marginTop: 22,
-    flexDirection: 'row',
-    gap: 10,
-  },
-  featureCard: {
-    width: 136,
-    height: 96,
-    borderRadius: 15,
-    borderWidth: 1,
-    borderColor: SHASHTNA_THEME.colors.border,
-    backgroundColor: SHASHTNA_THEME.colors.glassSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 10,
-  },
-  featureIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 11,
-    borderWidth: 1,
-    borderColor: SHASHTNA_THEME.colors.primary,
-    backgroundColor: SHASHTNA_THEME.colors.primarySoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 7,
-  },
-  featureTitle: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '800',
-    fontFamily: SHASHTNA_FONT.sans,
-  },
-  featureSub: {
-    color: SHASHTNA_THEME.colors.textMuted,
-    fontSize: 9,
-    marginTop: 4,
-    textAlign: 'center',
-  },
-  designerCredit: {
-    marginTop: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 9,
-    maxWidth: 390,
-  },
-  creditLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: 'rgba(91, 190, 255, 0.18)',
-  },
-  creditText: {
-    color: 'rgba(177, 204, 229, 0.70)',
-    fontSize: 8,
-    letterSpacing: 1.2,
-    fontWeight: '700',
-  },
-  panel: {
-    width: 550,
-    maxWidth: '47%',
-    padding: 23,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: SHASHTNA_THEME.colors.borderStrong,
-    backgroundColor: SHASHTNA_THEME.colors.glassStrong,
-    shadowColor: '#000000',
-    shadowOpacity: 0.40,
-    shadowRadius: 22,
-    shadowOffset: { width: 0, height: 12 },
-    elevation: 12,
-  },
-  panelHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 17,
-  },
-  linkBadge: {
-    width: 44,
-    height: 44,
-    borderRadius: 13,
-    backgroundColor: SHASHTNA_THEME.colors.primarySoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: SHASHTNA_THEME.colors.borderStrong,
-    marginRight: 13,
-  },
-  panelHeaderCopy: {
-    flex: 1,
-  },
-  eyebrow: {
-    color: SHASHTNA_THEME.colors.primaryBright,
-    fontSize: 9,
-    letterSpacing: 1.8,
-    fontWeight: '800',
-  },
-  panelTitle: {
-    color: '#FFFFFF',
-    fontSize: 24,
-    lineHeight: 31,
-    fontWeight: '900',
-    fontFamily: SHASHTNA_FONT.display,
-    marginTop: 4,
-  },
-  panelSub: {
-    color: SHASHTNA_THEME.colors.textSecondary,
-    fontSize: 12,
-    marginTop: 4,
-    fontFamily: SHASHTNA_FONT.sans,
-  },
-  serviceCard: {
-    minHeight: 62,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: SHASHTNA_THEME.colors.primary,
-    backgroundColor: SHASHTNA_THEME.colors.primarySoft,
-    paddingHorizontal: 13,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  serviceIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 11,
-    backgroundColor: 'rgba(23, 146, 244, 0.16)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  serviceCopy: {
-    flex: 1,
-    marginLeft: 11,
-  },
-  serviceTitle: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '900',
-  },
-  serviceSub: {
-    color: SHASHTNA_THEME.colors.textMuted,
-    fontSize: 9,
-    marginTop: 3,
-  },
-  serviceCheck: {
-    width: 27,
-    height: 27,
-    borderRadius: 14,
-    backgroundColor: '#1266B3',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  form: {
-    marginTop: 15,
-  },
-  inputBlock: {
-    marginBottom: 10,
-  },
-  label: {
-    color: SHASHTNA_THEME.colors.textSecondary,
-    fontSize: 10,
-    fontWeight: '800',
-    marginBottom: 7,
-  },
-  inputWrap: {
-    minHeight: 45,
-    borderRadius: 11,
-    borderWidth: 1,
-    borderColor: SHASHTNA_THEME.colors.border,
-    backgroundColor: SHASHTNA_THEME.colors.surface,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-  },
-  input: {
-    flex: 1,
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontFamily: SHASHTNA_FONT.sans,
-    textAlign: 'right',
-    paddingHorizontal: 10,
-  },
-  passwordToggle: {
-    width: 30,
-    height: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  connect: {
-    height: 48,
-    borderRadius: 12,
-    backgroundColor: SHASHTNA_THEME.colors.primary,
-    borderWidth: 1,
-    borderColor: SHASHTNA_THEME.colors.primaryBright,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 10,
-    marginTop: 8,
-  },
-  connectFocus: {
-    transform: [{ scale: 1.012 }],
-    shadowColor: SHASHTNA_THEME.colors.primary,
-    shadowOpacity: 0.55,
-    shadowRadius: 16,
-    elevation: 10,
-  },
-  connectPressed: {
-    opacity: 0.86,
-  },
-  connectText: {
-    color: '#FFFFFF',
-    fontSize: 17,
-    fontWeight: '900',
-    fontFamily: SHASHTNA_FONT.sans,
-  },
-  progressBox: {
-    marginTop: 12,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: SHASHTNA_THEME.colors.surface,
-    overflow: 'hidden',
-  },
-  progressBar: {
-    height: '100%',
-    backgroundColor: SHASHTNA_THEME.colors.primaryBright,
-  },
-  progressText: {
-    color: SHASHTNA_THEME.colors.textTertiary,
-    fontSize: 9,
-    marginTop: 5,
-    textAlign: 'center',
-  },
-  error: {
-    marginTop: 12,
-    padding: 11,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(240, 91, 104, 0.35)',
-    backgroundColor: 'rgba(240, 91, 104, 0.08)',
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-  },
-  errorIcon: {
-    width: 28,
-    height: 28,
-    borderRadius: 9,
-    backgroundColor: 'rgba(240, 91, 104, 0.10)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  errorCopy: {
-    flex: 1,
-    marginLeft: 9,
-  },
-  errorTitle: {
-    color: '#FFFFFF',
-    fontSize: 11,
-    fontWeight: '900',
-  },
-  errorBody: {
-    color: SHASHTNA_THEME.colors.textSecondary,
-    fontSize: 10,
-    marginTop: 3,
-    lineHeight: 15,
-  },
-  note: {
-    color: SHASHTNA_THEME.colors.textMuted,
-    fontSize: 8,
-    marginTop: 10,
-    textAlign: 'center',
-    lineHeight: 13,
-  },
+  screen: { flex: 1, overflow: 'hidden' },
+  scrim: { backgroundColor: 'rgba(2,5,16,0.5)' },
+  scroll: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 56, paddingVertical: 36 },
+  scrollCompact: { paddingHorizontal: 18, paddingVertical: 24 },
+  layout: { alignItems: 'center', gap: 48 },
+  pressed: { opacity: SHASHTNA_THEME.opacity.pressed },
+
+  presentation: { flex: 1, minWidth: 0, gap: 18 },
+  presentationCompact: { flex: 0, alignSelf: 'stretch', gap: 10 },
+  brandRow: { alignItems: 'center', gap: 16 },
+  logo: { width: 72, height: 72, borderRadius: 20 },
+  logoCompact: { width: 56, height: 56, borderRadius: 16 },
+  brandName: { fontSize: 26, fontWeight: '900', fontFamily: SHASHTNA_FONT.sans },
+  brandTag: { fontSize: 14, fontWeight: '800', marginTop: 2 },
+  headline: { fontSize: 44, lineHeight: 54, fontWeight: '900', fontFamily: SHASHTNA_FONT.display, marginTop: 10 },
+  body: { fontSize: T.size.body, lineHeight: T.lineHeight.body, maxWidth: 520 },
+  features: { gap: 10, flexWrap: 'wrap' },
+  feature: { height: 42, paddingHorizontal: 14, borderRadius: 21, borderWidth: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  featureText: { fontSize: 14, fontWeight: '800' },
+  posterFan: { marginTop: 14, gap: -18, alignItems: 'flex-end' },
+  fanPoster: { width: 96, height: 144, borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)', boxShadow: '0px 16px 30px rgba(0,0,0,0.5)' },
+
+  card: { width: 460, borderRadius: 28, borderWidth: 1, padding: 28, gap: 14, boxShadow: '0px 24px 60px rgba(0,0,0,0.45)' },
+  cardCompact: { width: '100%', padding: 20 },
+  cardTop: { justifyContent: 'space-between', alignItems: 'center' },
+  status: { height: 32, paddingHorizontal: 12, borderRadius: 16, borderWidth: 1, alignItems: 'center', gap: 8 },
+  statusDot: { width: 8, height: 8, borderRadius: 4 },
+  statusText: { fontSize: 12, fontWeight: '800' },
+  langToggle: { height: 36, paddingHorizontal: 12, borderRadius: 18, borderWidth: 1, alignItems: 'center', gap: 6 },
+  langText: { fontSize: 13, fontWeight: '800' },
+  cardTitle: { fontSize: 28, fontWeight: '900', fontFamily: SHASHTNA_FONT.sans, marginTop: 4 },
+  cardSub: { fontSize: 14, lineHeight: 21, marginTop: -6 },
+
+  segment: { height: 48, borderRadius: 16, borderWidth: 1, padding: 4, gap: 4 },
+  segmentButton: { flex: 1, borderRadius: 12, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: 'transparent' },
+  segmentText: { fontSize: 15, fontWeight: '900' },
+
+  field: { gap: 6 },
+  fieldLabel: { fontSize: 13, fontWeight: '800' },
+  inputWrap: { height: 56, borderRadius: 16, borderWidth: 2, paddingHorizontal: 14, alignItems: 'center', gap: 10 },
+  input: { flex: 1, fontSize: 16, fontFamily: SHASHTNA_FONT.sans, paddingVertical: 0 },
+  ltrInput: { textAlign: 'left', writingDirection: 'ltr' },
+  eye: { width: 38, height: 38, borderRadius: 12, borderWidth: 2, borderColor: 'transparent', alignItems: 'center', justifyContent: 'center' },
+
+  connect: { height: 58, borderRadius: 18, alignItems: 'center', justifyContent: 'center', gap: 10, marginTop: 6, borderWidth: 2, borderColor: 'transparent' },
+  connectLoading: { opacity: 0.85 },
+  connectText: { color: '#FFFFFF', fontSize: 17, fontWeight: '900' },
+
+  progressWrap: { gap: 6 },
+  progressTrack: { height: 6, borderRadius: 3, overflow: 'hidden' },
+  progressFill: { height: '100%', borderRadius: 3 },
+  progressText: { fontSize: 12, fontWeight: '700' },
+
+  error: { gap: 10, padding: 14, borderRadius: 16, backgroundColor: 'rgba(242,89,106,0.10)', borderWidth: 1, borderColor: 'rgba(242,89,106,0.35)' },
+  errorCopy: { flex: 1, gap: 4 },
+  errorTitle: { color: SHASHTNA_THEME.colors.danger, fontSize: 14, fontWeight: '900' },
+  errorBody: { fontSize: 14, lineHeight: 21 },
+  techToggle: { alignSelf: 'stretch', paddingVertical: 4, borderWidth: 2, borderColor: 'transparent', borderRadius: 8 },
+  techToggleText: { fontSize: 12, fontWeight: '800' },
+  techText: { fontSize: 11, lineHeight: 16, textAlign: 'left', writingDirection: 'ltr' },
+
+  note: { fontSize: 12, lineHeight: 18 },
+  credit: { textAlign: 'center', fontSize: 11, fontWeight: '700', marginTop: 24, letterSpacing: 0.4 },
 });
