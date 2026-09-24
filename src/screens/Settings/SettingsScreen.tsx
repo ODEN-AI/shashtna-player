@@ -2,6 +2,7 @@ import React from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import AppIcon from '../../components/common/AppIcon';
 import { SHASHTNA_FONT, SHASHTNA_THEME } from '../../design/theme';
+import { BRAND } from '../../design/brand';
 
 export type PreferredQuality = 'auto' | '1080p' | '720p' | '480p';
 export type AppLanguage = 'ar' | 'en';
@@ -49,7 +50,8 @@ export default function SettingsScreen({
     primary: '#0D73E8',
     primarySoft: '#E4F0FF',
   } : {
-    background: SHASHTNA_THEME.colors.background,
+    // Transparent so the AppShell background (Image 1) shows through.
+    background: 'transparent',
     surface: SHASHTNA_THEME.colors.surface,
     surfaceSoft: SHASHTNA_THEME.colors.glassSoft,
     text: '#FFFFFF',
@@ -77,7 +79,7 @@ export default function SettingsScreen({
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.headerRow}>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.eyebrow, { color: palette.primary }]}>عبدالرحمن IPTV</Text>
+            <Text style={[styles.eyebrow, { color: palette.primary }]}>{BRAND.nameInside}</Text>
             <Text style={[styles.title, { color: palette.text }]}>{ar ? 'الإعدادات' : 'Settings'}</Text>
             <Text style={[styles.description, { color: palette.secondary }]}>{ar ? 'تحكم بتجربة المشاهدة والتشغيل من مكان واحد.' : 'Control playback and viewing preferences from one place.'}</Text>
           </View>

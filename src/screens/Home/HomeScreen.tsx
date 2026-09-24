@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from 'react';
+﻿import React, { memo, useEffect, useMemo, useState } from 'react';
 import {
   Image,
   Pressable,
@@ -13,6 +13,11 @@ import { SHASHTNA_FONT, SHASHTNA_THEME } from '../../design/theme';
 import AppIcon, { AppIconName } from '../../components/common/AppIcon';
 import { useAppPreferences } from '../../design/AppPreferencesContext';
 import { focusStyle, Palette, usePalette } from '../../design/palette';
+import { useDeviceClass } from '../../design/device';
+import HeroCarousel from '../../features/ads/HeroCarousel';
+import { useAdvertisements } from '../../features/ads/advertisementRepository';
+import { Advertisement } from '../../features/ads/types';
+import { ContinueWatchingEntry, useContinueWatching } from '../../features/continueWatching/continueWatchingStore';
 
 type Props = {
   channels: M3UChannel[];
@@ -23,6 +28,9 @@ type Props = {
   onOpenPlayer: (channel: M3UChannel) => void;
   favoriteIds?: string[];
   onToggleFavorite?: (channel: M3UChannel) => void;
+  onResume: (entry: ContinueWatchingEntry) => void;
+  onOpenLiveGroup: (group: string) => void;
+  onAdAction: (ad: Advertisement) => void;
 };
 
 type MediaType = 'movie' | 'series';
@@ -189,7 +197,11 @@ export default function HomeScreen({
   onOpenPlayer,
   favoriteIds = [],
   onToggleFavorite,
+  onResume,
+  onOpenLiveGroup,
+  onAdAction,
 }:Props) {
+  const device = useDeviceClass();
   const { language } = useAppPreferences();
   const ar = language === 'ar';
   const palette = usePalette();
@@ -355,186 +367,79 @@ export default function HomeScreen({
     [latestMovies, latestSeries, rotation],
   );
 
-  const heroPool = useMemo(() => {
-    const merged = [...latestMovies.slice(0, 8), ...latestSeries.slice(0, 8)];
+  const topRated = useMemo(
+    () =>
+      [...latestMovies, ...latestSeries]
+        .filter(item => Number(item.meta.voteAverage) >= 6.5)
+        .sort((a, b) => Number(b.meta.voteAverage) - Number(a.meta.voteAverage))
+        .slice(0, 12),
+    [latestMovies, latestSeries],
+  );
 
-    if (merged.length) {
-      return merged;
+  const liveCategories = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const channel of channels) {
+      if (channel.contentType !== 'live') continue;
+      const name = String(channel.group || '').trim();
+      if (name) counts.set(name, (counts.get(name) || 0) + 1);
     }
+    return Array.from(counts, ([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 12);
+  }, [channels]);
 
-    return [...displayMovies, ...displaySeries];
-  }, [latestMovies, latestSeries, displayMovies, displaySeries]);
-
-  const hero = heroPool.length
-    ? heroPool[rotation % heroPool.length]
-    : undefined;
-
-  const heroPoster =
-    hero?.meta?.backdropPath
-      ? tmdbImageUrl(hero.meta.backdropPath, 'w780') || ''
-      : hero?.meta?.posterPath
-        ? tmdbImageUrl(hero.meta.posterPath, 'w780') || ''
-        : hero?.channel.logo || '';
+  const ads = useAdvertisements();
+  const continueWatching = useContinueWatching();
 
   const isFav = (item: MediaItem) => favoriteSet.has(`${item.type}:${String(item.channel.id)}`);
   const toggle = (item: MediaItem) => onToggleFavorite?.(item.channel);
   const locale = ar ? 'ar-IQ' : 'en-US';
-  const dir = ar ? 'rtl' : 'ltr';
-  const textAlign = ar ? 'right' : 'left';
   const rowDirection = ar ? 'row-reverse' : 'row';
-
-  const heroDots = Math.min(heroPool.length, 6);
-  const heroIndex = heroPool.length ? rotation % heroPool.length : 0;
-  const heroRating = Number(hero?.meta?.voteAverage || 0);
-  const heroYear = hero?.meta?.releaseDate ? hero.meta.releaseDate.slice(0, 4) : '';
+  const compact = device === 'phone';
 
   return (
     <View style={[styles.screen, { backgroundColor: palette.background }]}>
       <ScrollView
-        style={[styles.content, { direction: dir }]}
-        contentContainerStyle={styles.contentContainer}
+        style={styles.content}
+        contentContainerStyle={[styles.contentContainer, compact && styles.contentContainerCompact]}
         showsVerticalScrollIndicator={false}
-        removeClippedSubviews
       >
-        {/* ================= HERO ================= */}
-        <View style={[styles.hero, { backgroundColor: palette.surface, borderColor: palette.border }]}>
-          {heroPoster ? (
-            <Image source={{ uri: heroPoster }} style={styles.heroImage} resizeMode="cover" />
-          ) : (
-            <View style={[styles.heroImage, styles.heroPlaceholder]} />
-          )}
-          <View style={[styles.fill, { experimental_backgroundImage: ar ? palette.heroFadeRtl : palette.heroFade }]} />
-          <View style={[styles.fill, { experimental_backgroundImage: palette.heroBottom }]} />
+        {/* ================= ADVERTISEMENT HERO ================= */}
+        <HeroCarousel ads={ads} onAction={onAdAction} palette={palette} ar={ar} height={compact ? 260 : L.heroH} />
 
-          <View style={[styles.heroCopy, ar ? styles.heroCopyRtl : styles.heroCopyLtr]}>
-            <View style={[styles.heroBadgeRow, { flexDirection: rowDirection }]}>
-              <View style={styles.heroBadge}>
-                <Text style={styles.heroBadgeText}>{ar ? 'جديد' : 'NEW'}</Text>
-              </View>
-              {hero ? (
-                <Text style={[styles.heroKind, { color: palette.secondary }]}>
-                  {hero.type === 'movie' ? (ar ? 'فيلم' : 'Movie') : (ar ? 'مسلسل' : 'Series')}
-                </Text>
-              ) : null}
-            </View>
+        {/* ================= QUICK DESTINATIONS ================= */}
+        <View style={[styles.pills, { flexDirection: rowDirection, borderColor: palette.border }]}>
+          <NavPill icon="live" label={ar ? 'البث المباشر' : 'Live TV'} count={channelCount.toLocaleString(locale)} onPress={() => onNavigate('live')} palette={palette} ar={ar} />
+          <NavPill icon="movies" label={ar ? 'الأفلام' : 'Movies'} count={movieCount.toLocaleString(locale)} onPress={() => onNavigate('movies')} palette={palette} ar={ar} />
+          <NavPill icon="series" label={ar ? 'المسلسلات' : 'Series'} count={seriesCount.toLocaleString(locale)} onPress={() => onNavigate('series')} palette={palette} ar={ar} />
+          <NavPill icon="favorites" label={ar ? 'قائمتي' : 'My list'} count={favoriteIds.length.toLocaleString(locale)} onPress={() => onNavigate('favorites')} palette={palette} ar={ar} />
+        </View>
 
-            <Text numberOfLines={2} style={[styles.heroTitle, { color: palette.text, writingDirection: dir, textAlign }]}>
-              {hero ? hero.title : ar ? 'أحدث المحتوى يظهر هنا' : 'Latest content appears here'}
-            </Text>
-
-            {hero && (heroRating || heroYear) ? (
-              <View style={[styles.heroMetaRow, { flexDirection: rowDirection }]}>
-                {heroRating ? (
-                  <View style={[styles.metaPill, { flexDirection: rowDirection }]}>
-                    <AppIcon name="star" size={13} color={SHASHTNA_THEME.colors.rating} />
-                    <Text style={styles.metaPillText}>{heroRating.toFixed(1)}</Text>
-                  </View>
-                ) : null}
-                {heroYear ? (
-                  <View style={styles.metaPill}>
-                    <Text style={styles.metaPillText}>{heroYear}</Text>
-                  </View>
-                ) : null}
-              </View>
-            ) : null}
-
-            <Text numberOfLines={2} style={[styles.heroDesc, { color: palette.secondary, writingDirection: dir, textAlign }]}>
-              {hero?.meta?.overview ||
-                (ar
-                  ? 'نعرض لك أحدث الأفلام والمسلسلات الأجنبية المتوفرة في المصدر المتصل، مع تبديل الاقتراحات تلقائياً.'
-                  : 'Showing recent foreign movies and series available in the connected source, with rotating recommendations.')}
-            </Text>
-
-            {hero ? (
-              <View style={[styles.actions, { flexDirection: rowDirection }]}>
-                <Pressable
-                  focusable
-                  onPress={() => onOpenPlayer(hero.channel)}
-                  style={({ focused, pressed }) => [
-                    styles.primaryButton,
-                    { flexDirection: rowDirection },
-                    focused && focusStyle(palette, SHASHTNA_THEME.focus.buttonScale),
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <AppIcon name="play" size={18} color="#FFFFFF" />
-                  <Text style={styles.primaryButtonText}>{ar ? 'مشاهدة الآن' : 'Watch now'}</Text>
-                </Pressable>
-                <Pressable
-                  focusable
-                  onPress={() => toggle(hero)}
-                  style={({ focused, pressed }) => [
-                    styles.secondaryButton,
-                    { flexDirection: rowDirection, backgroundColor: palette.overlay, borderColor: palette.borderStrong },
-                    focused && focusStyle(palette, SHASHTNA_THEME.focus.buttonScale),
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <AppIcon
-                    name={isFav(hero) ? 'check' : 'plus'}
-                    size={18}
-                    color={palette.mode === 'dark' ? '#FFFFFF' : palette.text}
-                  />
-                  <Text style={[styles.secondaryButtonText, { color: palette.mode === 'dark' ? '#FFFFFF' : palette.text }]}>
-                    {isFav(hero) ? (ar ? 'في قائمتي' : 'In my list') : ar ? 'أضف لقائمتي' : 'My list'}
-                  </Text>
-                </Pressable>
-              </View>
-            ) : null}
-          </View>
-
-          {heroDots > 1 ? (
-            <View style={[styles.heroDots, ar ? styles.heroDotsRtl : styles.heroDotsLtr, { flexDirection: rowDirection }]}>
-              {Array.from({ length: heroDots }).map((_, i) => (
-                <View key={i} style={[styles.heroDot, i === heroIndex % heroDots && styles.heroDotActive]} />
+        {/* ================= CONTINUE WATCHING ================= */}
+        {continueWatching.length ? (
+          <View style={styles.section}>
+            <SectionHeader title={ar ? 'متابعة المشاهدة' : 'Continue watching'} palette={palette} ar={ar} />
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.row, { flexDirection: rowDirection }]}>
+              {continueWatching.map(entry => (
+                <ContinueCard key={entry.key} entry={entry} onPress={() => onResume(entry)} palette={palette} ar={ar} />
               ))}
-            </View>
-          ) : null}
-        </View>
+            </ScrollView>
+          </View>
+        ) : null}
 
-        {/* ================= QUICK ACCESS ================= */}
-        <View style={[styles.quickRow, { flexDirection: rowDirection }]}>
-          <QuickCard
-            icon="live"
-            accent={SHASHTNA_THEME.gradients.live}
-            title={ar ? 'البث المباشر' : 'Live TV'}
-            sub={`${channelCount.toLocaleString(locale)} ${ar ? 'قناة' : 'channels'}`}
-            onPress={() => onNavigate('live')}
-            palette={palette}
-            ar={ar}
-          />
-          <QuickCard
-            icon="movies"
-            accent={SHASHTNA_THEME.gradients.brand}
-            title={ar ? 'الأفلام' : 'Movies'}
-            sub={`${movieCount.toLocaleString(locale)} ${ar ? 'عنوان' : 'titles'}`}
-            onPress={() => onNavigate('movies')}
-            palette={palette}
-            ar={ar}
-          />
-          <QuickCard
-            icon="series"
-            accent="linear-gradient(120deg, #7B4DFF 0%, #B26BFF 100%)"
-            title={ar ? 'المسلسلات' : 'Series'}
-            sub={`${seriesCount.toLocaleString(locale)} ${ar ? 'مسلسل' : 'series'}`}
-            onPress={() => onNavigate('series')}
-            palette={palette}
-            ar={ar}
-          />
-          <QuickCard
-            icon="favorite"
-            accent="linear-gradient(120deg, #FF4D7A 0%, #FF8A5B 100%)"
-            title={ar ? 'المفضلة' : 'Favorites'}
-            sub={`${favoriteIds.length.toLocaleString(locale)} ${ar ? 'محفوظ' : 'saved'}`}
-            onPress={() => onNavigate('favorites')}
-            palette={palette}
-            ar={ar}
-          />
-        </View>
-
-        {/* ================= ROWS ================= */}
+        {/* ================= CONTENT ROWS ================= */}
         <MediaRow
-          title={ar ? 'أحدث الأفلام الأجنبية' : 'Latest foreign movies'}
+          title={ar ? 'الأعلى تقييماً' : 'Top rated'}
+          items={topRated}
+          keyPrefix="top"
+          palette={palette}
+          ar={ar}
+          isFav={isFav}
+          onToggle={onToggleFavorite ? toggle : undefined}
+          onOpen={item => onOpenPlayer(item.channel)}
+        />
+        <MediaRow
+          title={ar ? 'أحدث الأفلام' : 'Latest movies'}
           action={ar ? 'عرض الكل' : 'View all'}
           onAction={() => onNavigate('movies')}
           items={displayMovies}
@@ -546,7 +451,7 @@ export default function HomeScreen({
           onOpen={item => onOpenPlayer(item.channel)}
         />
         <MediaRow
-          title={ar ? 'أحدث المسلسلات الأجنبية' : 'Latest foreign series'}
+          title={ar ? 'أحدث المسلسلات' : 'Latest series'}
           action={ar ? 'عرض الكل' : 'View all'}
           onAction={() => onNavigate('series')}
           items={displaySeries}
@@ -559,7 +464,7 @@ export default function HomeScreen({
         />
         <MediaRow
           title={ar ? 'وصل حديثاً' : 'Recently added'}
-          action={ar ? 'تحديث العرض' : 'Refresh'}
+          action={ar ? 'تحديث' : 'Refresh'}
           actionIcon="refresh"
           onAction={() => setRotation(value => value + 1)}
           items={recentMixed}
@@ -570,6 +475,42 @@ export default function HomeScreen({
           onToggle={onToggleFavorite ? toggle : undefined}
           onOpen={item => onOpenPlayer(item.channel)}
         />
+
+        {/* ================= LIVE CATEGORIES ================= */}
+        {liveCategories.length ? (
+          <View style={styles.section}>
+            <SectionHeader
+              title={ar ? 'تصنيفات البث المباشر' : 'Live categories'}
+              action={ar ? 'كل القنوات' : 'All channels'}
+              onAction={() => onNavigate('live')}
+              palette={palette}
+              ar={ar}
+            />
+            <View style={[styles.categoryGrid, { flexDirection: rowDirection }]}>
+              {liveCategories.map(category => (
+                <Pressable
+                  key={category.name}
+                  focusable
+                  accessibilityRole="button"
+                  accessibilityLabel={category.name}
+                  onPress={() => onOpenLiveGroup(category.name)}
+                  style={({ focused, pressed }) => [
+                    styles.category,
+                    { flexDirection: rowDirection, backgroundColor: palette.surface, borderColor: palette.border },
+                    focused && focusStyle(palette, SHASHTNA_THEME.focus.buttonScale),
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <View style={styles.categoryDot} />
+                  <Text numberOfLines={1} style={[styles.categoryName, { color: palette.text, textAlign: ar ? 'right' : 'left' }]}>
+                    {category.name}
+                  </Text>
+                  <Text style={[styles.categoryCount, { color: palette.muted }]}>{category.count.toLocaleString(locale)}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        ) : null}
       </ScrollView>
     </View>
   );
@@ -579,40 +520,28 @@ export default function HomeScreen({
    BUILDING BLOCKS
    ========================================================= */
 
-function MediaRow({
+function SectionHeader({
   title,
   action,
   actionIcon = 'chevron',
   onAction,
-  items,
-  keyPrefix,
   palette,
   ar,
-  isFav,
-  onToggle,
-  onOpen,
 }: {
   title: string;
-  action: string;
+  action?: string;
   actionIcon?: AppIconName;
-  onAction: () => void;
-  items: RankedItem[];
-  keyPrefix: string;
+  onAction?: () => void;
   palette: Palette;
   ar: boolean;
-  isFav: (item: MediaItem) => boolean;
-  onToggle?: (item: MediaItem) => void;
-  onOpen: (item: MediaItem) => void;
 }) {
-  if (!items.length) return null;
-
   return (
-    <View style={styles.section}>
-      <View style={[styles.sectionHeader, { flexDirection: ar ? 'row-reverse' : 'row' }]}>
-        <View style={[styles.sectionTitleWrap, { flexDirection: ar ? 'row-reverse' : 'row' }]}>
-          <View style={styles.sectionAccent} />
-          <Text style={[styles.sectionTitle, { color: palette.text }]}>{title}</Text>
-        </View>
+    <View style={[styles.sectionHeader, { flexDirection: ar ? 'row-reverse' : 'row' }]}>
+      <View style={[styles.sectionTitleWrap, { flexDirection: ar ? 'row-reverse' : 'row' }]}>
+        <View style={styles.sectionAccent} />
+        <Text style={[styles.sectionTitle, { color: palette.text }]}>{title}</Text>
+      </View>
+      {action && onAction ? (
         <Pressable
           focusable
           onPress={onAction}
@@ -628,7 +557,41 @@ function MediaRow({
             <AppIcon name={actionIcon} size={14} color={palette.primaryText} />
           </View>
         </Pressable>
-      </View>
+      ) : null}
+    </View>
+  );
+}
+
+function MediaRow({
+  title,
+  action,
+  actionIcon,
+  onAction,
+  items,
+  keyPrefix,
+  palette,
+  ar,
+  isFav,
+  onToggle,
+  onOpen,
+}: {
+  title: string;
+  action?: string;
+  actionIcon?: AppIconName;
+  onAction?: () => void;
+  items: RankedItem[];
+  keyPrefix: string;
+  palette: Palette;
+  ar: boolean;
+  isFav: (item: MediaItem) => boolean;
+  onToggle?: (item: MediaItem) => void;
+  onOpen: (item: MediaItem) => void;
+}) {
+  if (!items.length) return null;
+
+  return (
+    <View style={styles.section}>
+      <SectionHeader title={title} action={action} actionIcon={actionIcon} onAction={onAction} palette={palette} ar={ar} />
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -650,7 +613,7 @@ function MediaRow({
   );
 }
 
-function PosterCard({
+const PosterCard = memo(function PosterCard({
   item,
   favorite,
   onPress,
@@ -694,7 +657,7 @@ function PosterCard({
             </Text>
           </View>
         )}
-        <View style={[styles.fill, { experimental_backgroundImage: SHASHTNA_THEME.gradients.posterBottom }]} />
+        <View style={styles.posterFade} />
         {rating ? (
           <View style={[styles.posterRating, ar ? styles.posterRatingRtl : styles.posterRatingLtr]}>
             <AppIcon name="star" size={11} color={SHASHTNA_THEME.colors.rating} />
@@ -721,6 +684,7 @@ function PosterCard({
         </Pressable>
       ) : null}
 
+      {/* Titles come from the playlist/TMDB and are shown as-is. */}
       <Text numberOfLines={1} style={[styles.posterTitle, { color: palette.text, textAlign: ar ? 'right' : 'left' }]}>
         {item.title}
       </Text>
@@ -729,21 +693,79 @@ function PosterCard({
       </Text>
     </View>
   );
-}
+});
 
-function QuickCard({
+const ContinueCard = memo(function ContinueCard({
+  entry,
+  onPress,
+  palette,
+  ar,
+}: {
+  entry: ContinueWatchingEntry;
+  onPress: () => void;
+  palette: Palette;
+  ar: boolean;
+}) {
+  const [failed, setFailed] = useState(false);
+  const image = entry.item.logo || entry.parent?.logo || '';
+  const ratio = entry.duration > 0 ? Math.min(1, entry.position / entry.duration) : 0;
+  const remaining = Math.max(0, Math.round((entry.duration - entry.position) / 60));
+  const episode =
+    entry.item.seasonNumber || entry.item.episodeNumber
+      ? `S${entry.item.seasonNumber ?? 1} · E${entry.item.episodeNumber ?? 1}`
+      : '';
+  const title = entry.parent?.name || entry.item.name;
+
+  return (
+    <View style={styles.continueWrap}>
+      <Pressable
+        focusable
+        accessibilityRole="button"
+        accessibilityLabel={title}
+        onPress={onPress}
+        style={({ focused, pressed }) => [
+          styles.continueCard,
+          { backgroundColor: palette.surfaceElevated, borderColor: palette.border },
+          focused && focusStyle(palette),
+          pressed && styles.pressed,
+        ]}
+      >
+        {image && !failed ? (
+          <Image source={{ uri: image }} style={styles.posterImage} onError={() => setFailed(true)} />
+        ) : (
+          <View style={styles.posterFallback}>
+            <AppIcon name={entry.item.contentType === 'movie' ? 'movies' : 'series'} size={28} color={palette.muted} />
+          </View>
+        )}
+        <View style={styles.posterFade} />
+        <View style={styles.continuePlay}>
+          <AppIcon name="play" size={18} color="#FFFFFF" />
+        </View>
+        <View style={styles.continueTrack}>
+          <View style={[styles.continueFill, { width: `${ratio * 100}%` }]} />
+        </View>
+      </Pressable>
+      <Text numberOfLines={1} style={[styles.posterTitle, { color: palette.text, textAlign: ar ? 'right' : 'left' }]}>
+        {title}
+      </Text>
+      <Text numberOfLines={1} style={[styles.posterMeta, { color: palette.muted, textAlign: ar ? 'right' : 'left' }]}>
+        {[episode, ar ? `متبقي ${remaining} د` : `${remaining} min left`].filter(Boolean).join(' • ')}
+      </Text>
+    </View>
+  );
+});
+
+function NavPill({
   icon,
-  accent,
-  title,
-  sub,
+  label,
+  count,
   onPress,
   palette,
   ar,
 }: {
   icon: AppIconName;
-  accent: string;
-  title: string;
-  sub: string;
+  label: string;
+  count: string;
   onPress: () => void;
   palette: Palette;
   ar: boolean;
@@ -751,25 +773,19 @@ function QuickCard({
   return (
     <Pressable
       focusable
+      accessibilityRole="button"
+      accessibilityLabel={label}
       onPress={onPress}
       style={({ focused, pressed }) => [
-        styles.quickCard,
-        { flexDirection: ar ? 'row-reverse' : 'row', backgroundColor: palette.surface, borderColor: palette.border },
+        styles.pill,
+        { flexDirection: ar ? 'row-reverse' : 'row' },
         focused && focusStyle(palette, SHASHTNA_THEME.focus.buttonScale),
         pressed && styles.pressed,
       ]}
     >
-      <View style={[styles.quickIcon, { experimental_backgroundImage: accent }]}>
-        <AppIcon name={icon} size={20} color="#FFFFFF" />
-      </View>
-      <View style={styles.quickText}>
-        <Text numberOfLines={1} style={[styles.quickTitle, { color: palette.text, textAlign: ar ? 'right' : 'left' }]}>
-          {title}
-        </Text>
-        <Text numberOfLines={1} style={[styles.quickSub, { color: palette.muted, textAlign: ar ? 'right' : 'left' }]}>
-          {sub}
-        </Text>
-      </View>
+      <AppIcon name={icon} size={18} color={palette.primaryText} />
+      <Text numberOfLines={1} style={[styles.pillLabel, { color: palette.text }]}>{label}</Text>
+      <Text style={[styles.pillCount, { color: palette.muted }]}>{count}</Text>
     </Pressable>
   );
 }
@@ -781,44 +797,16 @@ const styles = StyleSheet.create({
   screen: { flex: 1, overflow: 'hidden' },
   content: { flex: 1 },
   contentContainer: { paddingHorizontal: L.contentX, paddingTop: 24, paddingBottom: 48 },
-  fill: { position: 'absolute', left: 0, top: 0, right: 0, bottom: 0 },
+  contentContainerCompact: { paddingHorizontal: 16, paddingTop: 16 },
   flipX: { transform: [{ scaleX: -1 }] },
 
-  hero: { height: L.heroH, borderRadius: 26, borderWidth: 1, overflow: 'hidden', position: 'relative' },
-  heroImage: { position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, width: '100%', height: '100%' },
-  heroPlaceholder: { experimental_backgroundImage: 'linear-gradient(120deg, #0C1B36 0%, #1560DB 60%, #5CC4FF 100%)', opacity: 0.35 },
-  heroCopy: { position: 'absolute', top: 0, bottom: 0, width: '62%', paddingHorizontal: 36, justifyContent: 'center' },
-  heroCopyLtr: { left: 0, alignItems: 'flex-start' },
-  heroCopyRtl: { right: 0, alignItems: 'flex-end' },
-  heroBadgeRow: { alignItems: 'center', gap: 10, marginBottom: 10 },
-  heroBadge: { height: 24, paddingHorizontal: 10, borderRadius: 7, justifyContent: 'center', experimental_backgroundImage: SHASHTNA_THEME.gradients.brand },
-  heroBadgeText: { color: '#FFFFFF', fontSize: 12, fontWeight: '900', letterSpacing: 0.5 },
-  heroKind: { fontSize: T.size.metadata, fontWeight: '800' },
-  heroTitle: { fontSize: T.size.hero, lineHeight: T.lineHeight.hero, fontWeight: '900', fontFamily: SHASHTNA_FONT.display },
-  heroMetaRow: { alignItems: 'center', gap: 8, marginTop: 12 },
-  metaPill: { height: 26, paddingHorizontal: 10, borderRadius: 13, backgroundColor: 'rgba(255,255,255,0.10)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 5 },
-  metaPillText: { color: '#FFFFFF', fontSize: 13, fontWeight: '900' },
-  heroDesc: { fontSize: T.size.body, lineHeight: T.lineHeight.body, marginTop: 12, fontFamily: SHASHTNA_FONT.sans },
-  actions: { gap: 12, marginTop: 20, alignItems: 'center' },
-  primaryButton: { height: 50, paddingHorizontal: 24, borderRadius: 25, alignItems: 'center', justifyContent: 'center', gap: 10, borderWidth: 2, borderColor: 'transparent', experimental_backgroundImage: SHASHTNA_THEME.gradients.brand, boxShadow: SHASHTNA_THEME.shadows.brand },
-  primaryButtonText: { color: '#FFFFFF', fontSize: T.size.button, fontWeight: '900' },
-  secondaryButton: { height: 50, paddingHorizontal: 22, borderRadius: 25, borderWidth: 2, alignItems: 'center', justifyContent: 'center', gap: 9 },
-  secondaryButtonText: { fontSize: T.size.button, fontWeight: '800' },
-  heroDots: { position: 'absolute', bottom: 18, gap: 6, alignItems: 'center' },
-  heroDotsLtr: { right: 24 },
-  heroDotsRtl: { left: 24 },
-  heroDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.35)' },
-  heroDotActive: { width: 22, backgroundColor: '#FFFFFF' },
-
-  quickRow: { marginTop: 22, gap: 14 },
-  quickCard: { flex: 1, height: 78, borderRadius: 20, borderWidth: 1, paddingHorizontal: 14, alignItems: 'center', gap: 12 },
-  quickIcon: { width: 46, height: 46, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
-  quickText: { flex: 1, minWidth: 0 },
-  quickTitle: { fontSize: T.size.button, fontWeight: '900' },
-  quickSub: { fontSize: T.size.caption, marginTop: 3, fontWeight: '700' },
+  pills: { marginTop: 18, padding: 6, gap: 6, borderRadius: 30, borderWidth: 1, alignSelf: 'center', backgroundColor: 'rgba(8,14,32,0.55)', flexWrap: 'wrap', justifyContent: 'center' },
+  pill: { height: 48, paddingHorizontal: 18, borderRadius: 24, alignItems: 'center', gap: 9, borderWidth: 2, borderColor: 'transparent' },
+  pillLabel: { fontSize: T.size.secondary, fontWeight: '900', fontFamily: SHASHTNA_FONT.sans },
+  pillCount: { fontSize: 12, fontWeight: '800', fontVariant: ['tabular-nums'] },
 
   section: { marginTop: SHASHTNA_THEME.spacing.section },
-  sectionHeader: { alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
+  sectionHeader: { alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, minHeight: 38 },
   sectionTitleWrap: { alignItems: 'center', gap: 10 },
   sectionAccent: { width: 4, height: 20, borderRadius: 2, experimental_backgroundImage: SHASHTNA_THEME.gradients.brand },
   sectionTitle: { fontSize: T.size.section, lineHeight: T.lineHeight.section, fontWeight: '900', fontFamily: SHASHTNA_FONT.sans },
@@ -827,10 +815,11 @@ const styles = StyleSheet.create({
 
   row: { gap: L.rowGap, paddingHorizontal: 6, paddingTop: 12, paddingBottom: 10 },
   posterWrap: { width: L.compactW, position: 'relative' },
-  poster: { width: L.compactW, height: L.compactH, borderRadius: 16, overflow: 'hidden', borderWidth: 1 },
+  poster: { width: L.compactW, height: L.compactH, borderRadius: 18, overflow: 'hidden', borderWidth: 1 },
   posterImage: { width: '100%', height: '100%', resizeMode: 'cover' },
-  posterFallback: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 12, gap: 10, experimental_backgroundImage: 'linear-gradient(160deg, #13203A 0%, #0A101C 100%)' },
+  posterFallback: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 12, gap: 10, experimental_backgroundImage: 'linear-gradient(160deg, rgba(22,38,80,0.9) 0%, rgba(8,14,32,0.9) 100%)' },
   posterFallbackText: { fontSize: 13, lineHeight: 18, fontWeight: '800', textAlign: 'center' },
+  posterFade: { position: 'absolute', left: 0, right: 0, bottom: 0, height: '45%', experimental_backgroundImage: SHASHTNA_THEME.gradients.posterBottom },
   posterRating: { position: 'absolute', bottom: 8, height: 22, paddingHorizontal: 7, borderRadius: 11, backgroundColor: 'rgba(2,4,9,0.78)', flexDirection: 'row', alignItems: 'center', gap: 4 },
   posterRatingLtr: { left: 8 },
   posterRatingRtl: { right: 8 },
@@ -842,5 +831,17 @@ const styles = StyleSheet.create({
   posterTitle: { fontSize: T.size.cardTitle, lineHeight: T.lineHeight.cardTitle, fontWeight: '800', marginTop: 10, paddingHorizontal: 2 },
   posterMeta: { fontSize: 12, marginTop: 2, fontWeight: '700', paddingHorizontal: 2 },
 
-  pressed: { opacity: 0.84 },
+  continueWrap: { width: 256 },
+  continueCard: { width: 256, height: 144, borderRadius: 18, overflow: 'hidden', borderWidth: 1 },
+  continuePlay: { position: 'absolute', bottom: 16, left: 12, width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', experimental_backgroundImage: SHASHTNA_THEME.gradients.brand },
+  continueTrack: { position: 'absolute', left: 12, right: 12, bottom: 8, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.25)', overflow: 'hidden' },
+  continueFill: { height: '100%', backgroundColor: SHASHTNA_THEME.colors.primaryBright },
+
+  categoryGrid: { flexWrap: 'wrap', gap: 12, paddingTop: 12, paddingHorizontal: 4 },
+  category: { minWidth: 210, maxWidth: 300, height: 56, paddingHorizontal: 16, borderRadius: 18, borderWidth: 2, alignItems: 'center', gap: 10 },
+  categoryDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: SHASHTNA_THEME.colors.live },
+  categoryName: { flex: 1, fontSize: 15, fontWeight: '800' },
+  categoryCount: { fontSize: 13, fontWeight: '800', fontVariant: ['tabular-nums'] },
+
+  pressed: { opacity: SHASHTNA_THEME.opacity.pressed },
 });

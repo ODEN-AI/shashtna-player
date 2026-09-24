@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Image,
   ImageBackground,
   Pressable,
   StyleSheet,
@@ -15,14 +16,13 @@ import {
 } from '../../lib/m3u';
 import { getTmdbMetadata, tmdbImageUrl } from '../../lib/tmdb';
 import { SHASHTNA_FONT, SHASHTNA_THEME } from '../../design/theme';
+import { BRAND, BRAND_ASSETS } from '../../design/brand';
 import { useAppPreferences } from '../../design/AppPreferencesContext';
 import AppIcon from '../../components/common/AppIcon';
 
 type Props = {
   onConnected: (channels: M3UChannel[], source: string) => void;
 };
-
-const BRAND_MARK = 'AB';
 
 async function checkNetworkConnection(): Promise<boolean> {
   const endpoints = [
@@ -254,12 +254,12 @@ export default function ConnectionScreen({ onConnected }: Props) {
       <View style={styles.topbar}>
         <View style={styles.brand}>
           <View style={styles.brandLogoFrame}>
-            <Text style={styles.brandMark}>{BRAND_MARK}</Text>
+            <Image source={BRAND_ASSETS.logo} style={styles.brandLogoImage} />
           </View>
 
           <View style={styles.brandCopy}>
-            <Text style={styles.brandArabic}>عبدالرحمن</Text>
-            <Text style={styles.brandLatin}>IPTV</Text>
+            <Text style={styles.brandArabic}>{BRAND.nameArabic}</Text>
+            <Text style={styles.brandLatin}>PLAYER</Text>
             <Text style={styles.brandDescriptor}>
               {ar ? 'منصة ترفيهك على شاشة واحدة' : 'Your entertainment, one screen'}
             </Text>
@@ -341,7 +341,7 @@ export default function ConnectionScreen({ onConnected }: Props) {
             </View>
 
             <View style={styles.panelHeaderCopy}>
-              <Text style={styles.eyebrow}>ABDULRAHMAN IPTV</Text>
+              <Text style={styles.eyebrow}>{BRAND.nameLatin.toUpperCase()}</Text>
               <Text style={styles.panelTitle}>
                 {ar ? 'أدخل البيانات الخاصة باشتراكك' : 'Enter your subscription details'}
               </Text>
@@ -583,6 +583,10 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.28,
     shadowRadius: 12,
     elevation: 8,
+  },
+  brandLogoImage: {
+    width: '100%',
+    height: '100%',
   },
   brandMark: {
     color: '#FFFFFF',

@@ -12,6 +12,7 @@ import {
   Easing,
   FlatList,
   Image,
+  Linking,
   Pressable,
   ScrollView,
   StatusBar,
@@ -34,6 +35,7 @@ import { AppPreferencesProvider, useAppPreferences } from './src/design/AppPrefe
 import { focusStyle, usePalette } from './src/design/palette';
 import AppShell from './src/app/AppShell';
 import { ContinueWatchingEntry } from './src/features/continueWatching/continueWatchingStore';
+import { Advertisement } from './src/features/ads/types';
 import Sidebar from './src/navigation/Sidebar';
 
 import {
@@ -282,6 +284,9 @@ function Home({
   onOpenPlayer,
   favoriteIds,
   onToggleFavorite,
+  onResume,
+  onOpenLiveGroup,
+  onAdAction,
 }: {
   channels: M3UChannel[];
   channelCount: number;
@@ -302,9 +307,15 @@ function Home({
   ) => void;
   favoriteIds?: string[];
   onToggleFavorite?: (channel: M3UChannel) => void;
+  onResume: (entry: ContinueWatchingEntry) => void;
+  onOpenLiveGroup: (group: string) => void;
+  onAdAction: (ad: Advertisement) => void;
 }) {
   return (
     <HomeScreen
+      onResume={onResume}
+      onOpenLiveGroup={onOpenLiveGroup}
+      onAdAction={onAdAction}
       channels={
         channels
       }
@@ -930,6 +941,21 @@ function App() {
     setSelectedChannel(entry.item);
   };
 
+  const handleAdAction = (ad: Advertisement) => {
+    const action = ad.action;
+
+    if (action.type === 'navigate') {
+      setActiveNav(action.page);
+    } else if (action.type === 'liveCategory') {
+      openLiveGroup(action.group);
+    } else if (action.type === 'external') {
+      // Many TV boxes ship without a browser; the ad also shows displayUrl as text.
+      Linking.openURL(action.url).catch(error =>
+        console.warn('[Shashtna] Could not open advertisement link:', error),
+      );
+    }
+  };
+
   const openLiveGroup = (group: string) => {
     setLiveInitialGroup(group);
     setActiveNav('live');
@@ -1177,6 +1203,9 @@ function App() {
         }
         favoriteIds={Array.from(favoriteIds)}
         onToggleFavorite={toggleFavorite}
+        onResume={handleResume}
+        onOpenLiveGroup={openLiveGroup}
+        onAdAction={handleAdAction}
       />
     );
   }
