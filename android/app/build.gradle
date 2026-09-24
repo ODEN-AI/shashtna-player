@@ -80,6 +80,30 @@ android {
     }
 }
 
+// Keep `gradlew clean` working with autolinked New Architecture libraries.
+// :app:externalNativeBuildClean* re-configures CMake, which includes the
+// generated Android-autolinking.cmake and add_subdirectory()s each library's
+// codegen output (<library>/android/build/generated/source/codegen/jni).
+// That output is missing after a fresh `npm install` or a library `clean`,
+// so the app's native clean failed before `:app:clean` could remove the stale
+// CMake state. Run each library's codegen after its own `clean` and before the
+// app's native clean. It is the same task instance that preBuild uses, so a
+// `clean assembleDebug` still generates it only once.
+def appProject = project
+rootProject.subprojects { lib ->
+    if (lib == appProject) return
+    lib.pluginManager.withPlugin("com.facebook.react") {
+        lib.tasks.matching {
+            it.name == "generateCodegenSchemaFromJavaScript" || it.name == "generateCodegenArtifactsFromSchema"
+        }.configureEach {
+            it.mustRunAfter(lib.tasks.matching { t -> t.name == "clean" })
+        }
+        appProject.tasks.matching { it.name.startsWith("externalNativeBuildClean") }.configureEach {
+            it.dependsOn(lib.tasks.matching { t -> t.name == "generateCodegenArtifactsFromSchema" })
+        }
+    }
+}
+
 dependencies {
     implementation("com.facebook.react:react-android")
 
