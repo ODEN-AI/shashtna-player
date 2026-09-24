@@ -2,6 +2,8 @@ import React from 'react';
 import { StyleSheet, View } from 'react-native';
 import { Ionicons } from '@react-native-vector-icons/ionicons/static';
 import { SHASHTNA_THEME } from '../../design/theme';
+import { useOptionalAppPreferences } from '../../design/AppPreferencesContext';
+import { resolveAccent } from '../../features/appearance/accents';
 
 export type AppIconName =
   | 'home' | 'live' | 'movies' | 'series' | 'favorites' | 'favorite'
@@ -88,11 +90,14 @@ export default function AppIcon({
   size = 22,
   color,
 }: Props) {
+  const preferences = useOptionalAppPreferences();
   const tint =
     color ??
     (active
       ? SHASHTNA_THEME.colors.white
-      : SHASHTNA_THEME.colors.primaryLight);
+      : preferences
+        ? resolveAccent(preferences.accent, preferences.customAccent).light
+        : SHASHTNA_THEME.colors.primaryLight);
 
   return (
     <View

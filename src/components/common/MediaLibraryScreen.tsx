@@ -139,7 +139,7 @@ function Chip({ label, icon, active, onPress, palette }: {
       style={({ focused, pressed }) => [
         styles.chip,
         { backgroundColor: palette.surface, borderColor: palette.border },
-        active && styles.chipActive,
+        active && [styles.chipActive, { experimental_backgroundImage: palette.accent.gradient }],
         focused && focusStyle(palette, SHASHTNA_THEME.focus.buttonScale),
         pressed && styles.pressed,
       ]}

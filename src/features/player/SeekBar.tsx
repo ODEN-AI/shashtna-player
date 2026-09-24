@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 
 import { SHASHTNA_THEME } from '../../design/theme';
+import { usePalette } from '../../design/palette';
 import { formatClock, ProgressStore, useProgress } from './progressStore';
 
 type Props = {
@@ -50,6 +51,7 @@ function tvStep(duration: number, streak: number): number {
  */
 function SeekBar({ store, duration, onSeek, onActivity, onScrubbingChange, accessibilityLabel }: Props) {
   const { currentTime, playableDuration } = useProgress(store);
+  const palette = usePalette();
   const [preview, setPreview] = useState<number | null>(null);
   const [focused, setFocused] = useState(false);
   const [trackWidth, setTrackWidth] = useState(0);
@@ -190,7 +192,7 @@ function SeekBar({ store, duration, onSeek, onActivity, onScrubbingChange, acces
         onPress={() => {
           if (previewRef.current !== null) commit();
         }}
-        style={[styles.hitArea, focused && styles.hitAreaFocused]}
+        style={[styles.hitArea, focused && [styles.hitAreaFocused, { boxShadow: palette.accent.focusShadow }]]}
       >
         <View
           style={styles.trackHost}
@@ -199,13 +201,13 @@ function SeekBar({ store, duration, onSeek, onActivity, onScrubbingChange, acces
         >
           <View pointerEvents="none" style={[styles.track, active && styles.trackActive]}>
             <View style={[styles.buffered, { width: `${buffered * 100}%` }]} />
-            <View style={[styles.fill, { width: `${progress * 100}%` }]} />
+            <View style={[styles.fill, { width: `${progress * 100}%`, experimental_backgroundImage: palette.accent.gradient }]} />
           </View>
           <View
             pointerEvents="none"
             style={[
               styles.thumb,
-              active && styles.thumbActive,
+              active && [styles.thumbActive, { boxShadow: palette.accent.focusShadow }],
               { left: Math.max(0, progress * trackWidth - (active ? 12 : 8)) },
             ]}
           />

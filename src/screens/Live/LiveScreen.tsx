@@ -220,7 +220,7 @@ export default function LiveScreen({ channels, onOpenPlayer, onBackHome, initial
                 style={({ pressed }) => [
                   styles.chip,
                   { backgroundColor: palette.surface, borderColor: palette.border },
-                  active && styles.chipActive,
+                  active && [styles.chipActive, { experimental_backgroundImage: palette.accent.gradient }],
                   pressed && styles.pressed,
                 ]}
               >
@@ -287,12 +287,12 @@ const GroupItem = memo(function GroupItem({
       style={({ focused, pressed }) => [
         styles.groupItem,
         { flexDirection: ar ? 'row-reverse' : 'row' },
-        active && { experimental_backgroundImage: SHASHTNA_THEME.gradients.brandSoft, borderColor: palette.primarySoft },
+        active && { experimental_backgroundImage: palette.accent.softGradient, borderColor: palette.primarySoft },
         focused && focusStyle(palette, SHASHTNA_THEME.focus.buttonScale),
         pressed && styles.pressed,
       ]}
     >
-      {active ? <View style={[styles.groupIndicator, ar ? styles.groupIndicatorRtl : styles.groupIndicatorLtr]} /> : null}
+      {active ? <View style={[styles.groupIndicator, ar ? styles.groupIndicatorRtl : styles.groupIndicatorLtr, { backgroundColor: palette.accent.bright }]} /> : null}
       <Text
         numberOfLines={1}
         style={[

@@ -38,7 +38,7 @@ describe('favorites persistence', () => {
     saveFavorites(new Set(['movie:1', 'series:2', 'live:7'])); // debounced: last write wins
     jest.runAllTimers();
     jest.useRealTimers();
-    await new Promise(resolve => setImmediate(resolve));
+    await new Promise<void>(resolve => setImmediate(() => resolve()));
     expect(await loadFavorites()).toEqual(['movie:1', 'series:2', 'live:7']);
   });
 

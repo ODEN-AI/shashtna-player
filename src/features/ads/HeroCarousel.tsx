@@ -103,7 +103,7 @@ function HeroCarousel({ ads, onAction, palette, ar, height }: Props) {
         {imageSource ? (
           <Image source={imageSource} style={styles.artwork} resizeMode="cover" />
         ) : (
-          <View style={[styles.glow, ar ? styles.glowRtl : styles.glowLtr, { experimental_backgroundImage: ad.accent || SHASHTNA_THEME.gradients.brand }]} />
+          <View style={[styles.glow, ar ? styles.glowRtl : styles.glowLtr, { experimental_backgroundImage: ad.accent || palette.accent.gradient }]} />
         )}
         <View style={[StyleSheet.absoluteFill, { experimental_backgroundImage: ar ? palette.heroFadeRtl : palette.heroFade }]} />
 
@@ -111,7 +111,7 @@ function HeroCarousel({ ads, onAction, palette, ar, height }: Props) {
           <View style={[styles.copy, { alignItems: ar ? 'flex-end' : 'flex-start' }]}>
             <View style={[styles.eyebrowRow, { flexDirection: rowDirection }]}>
               <Image source={BRAND_ASSETS.logo} style={styles.eyebrowLogo} />
-              <Text style={styles.eyebrow}>{BRAND.nameInside}</Text>
+              <Text style={[styles.eyebrow, { color: palette.accent.light }]}>{BRAND.nameInside}</Text>
             </View>
             <Text numberOfLines={2} style={[styles.title, { textAlign: ar ? 'right' : 'left', writingDirection: ar ? 'rtl' : 'ltr' }]}>
               {t(ad.title)}
@@ -130,7 +130,7 @@ function HeroCarousel({ ads, onAction, palette, ar, height }: Props) {
                   onBlur={onBlur}
                   style={({ focused, pressed }) => [
                     styles.cta,
-                    { flexDirection: rowDirection },
+                    { flexDirection: rowDirection, experimental_backgroundImage: palette.accent.gradient, boxShadow: palette.accent.buttonShadow },
                     focused && focusStyle(palette, SHASHTNA_THEME.focus.buttonScale),
                     pressed && styles.pressed,
                   ]}

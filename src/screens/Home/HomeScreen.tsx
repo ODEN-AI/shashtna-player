@@ -538,7 +538,7 @@ function SectionHeader({
   return (
     <View style={[styles.sectionHeader, { flexDirection: ar ? 'row-reverse' : 'row' }]}>
       <View style={[styles.sectionTitleWrap, { flexDirection: ar ? 'row-reverse' : 'row' }]}>
-        <View style={styles.sectionAccent} />
+        <View style={[styles.sectionAccent, { experimental_backgroundImage: palette.accent.gradient }]} />
         <Text style={[styles.sectionTitle, { color: palette.text }]}>{title}</Text>
       </View>
       {action && onAction ? (
@@ -738,11 +738,11 @@ const ContinueCard = memo(function ContinueCard({
           </View>
         )}
         <View style={styles.posterFade} />
-        <View style={styles.continuePlay}>
+        <View style={[styles.continuePlay, { experimental_backgroundImage: palette.accent.gradient }]}>
           <AppIcon name="play" size={18} color="#FFFFFF" />
         </View>
         <View style={styles.continueTrack}>
-          <View style={[styles.continueFill, { width: `${ratio * 100}%` }]} />
+          <View style={[styles.continueFill, { width: `${ratio * 100}%`, backgroundColor: palette.accent.bright }]} />
         </View>
       </Pressable>
       <Text numberOfLines={1} style={[styles.posterTitle, { color: palette.text, textAlign: ar ? 'right' : 'left' }]}>

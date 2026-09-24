@@ -109,7 +109,7 @@ export const SHASHTNA_THEME = {
   layout: {
     sidebar: 196,
     railCollapsed: 84,
-    railCollapsedTouch: 68,
+    railCollapsedTouch: 76,
     railExpanded: 236,
     contentX: 40,
     contentY: 27,

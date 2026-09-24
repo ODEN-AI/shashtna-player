@@ -42,3 +42,8 @@ export function useAppPreferences() {
   }
   return value;
 }
+
+/** For shared primitives (icons) that may render outside the provider. */
+export function useOptionalAppPreferences() {
+  return useContext(AppPreferencesContext);
+}

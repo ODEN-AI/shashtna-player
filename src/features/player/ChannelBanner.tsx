@@ -3,6 +3,7 @@ import { ActivityIndicator, Animated, Image, StyleSheet, Text, View } from 'reac
 
 import { M3UChannel } from '../../lib/m3u';
 import { SHASHTNA_FONT, SHASHTNA_THEME } from '../../design/theme';
+import { usePalette } from '../../design/palette';
 
 export type ChannelBannerState = {
   channel: M3UChannel;
@@ -22,6 +23,7 @@ type Props = { state: ChannelBannerState | null; loading: boolean; ar: boolean }
  * focus and never opens the full control panel.
  */
 function ChannelBanner({ state, loading, ar }: Props) {
+  const palette = usePalette();
   const opacity = useRef(new Animated.Value(0)).current;
   const [logoFailed, setLogoFailed] = useState(false);
 
@@ -38,7 +40,7 @@ function ChannelBanner({ state, loading, ar }: Props) {
   return (
     <Animated.View pointerEvents="none" style={[styles.wrap, ar ? styles.wrapRtl : styles.wrapLtr, { opacity }]}>
       <View style={[styles.card, { flexDirection: rowDirection }]}>
-        <View style={styles.number}>
+        <View style={[styles.number, { experimental_backgroundImage: palette.accent.gradient }]}>
           <Text style={styles.numberText}>{number}</Text>
         </View>
         <View style={styles.logoBox}>
@@ -61,7 +63,7 @@ function ChannelBanner({ state, loading, ar }: Props) {
                 : `${channel.group ? `${channel.group} · ` : ''}${number}/${total}`}
           </Text>
         </View>
-        {pending || loading ? <ActivityIndicator size="small" color={SHASHTNA_THEME.colors.primaryLight} /> : null}
+        {pending || loading ? <ActivityIndicator size="small" color={palette.accent.light} /> : null}
       </View>
     </Animated.View>
   );

@@ -3,6 +3,9 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import AppIcon from '../../components/common/AppIcon';
 import { SHASHTNA_FONT, SHASHTNA_THEME } from '../../design/theme';
 import { BRAND } from '../../design/brand';
+import { usePalette } from '../../design/palette';
+import { useAppPreferences } from '../../design/AppPreferencesContext';
+import AccentPicker from '../../features/appearance/AccentPicker';
 
 export type PreferredQuality = 'auto' | '1080p' | '720p' | '480p';
 export type AppLanguage = 'ar' | 'en';
@@ -39,27 +42,19 @@ export default function SettingsScreen({
 }: Props) {
   const ar = language === 'ar';
   const light = themeMode === 'light';
-  const palette = light ? {
-    background: '#F4F7FB',
-    surface: '#FFFFFF',
-    surfaceSoft: '#EEF4FA',
-    text: '#112033',
-    secondary: '#567089',
-    muted: '#71859A',
-    border: '#D7E3EF',
-    primary: '#0D73E8',
-    primarySoft: '#E4F0FF',
-  } : {
-    // Transparent so the AppShell background (Image 1) shows through.
-    background: 'transparent',
-    surface: SHASHTNA_THEME.colors.surface,
-    surfaceSoft: SHASHTNA_THEME.colors.glassSoft,
-    text: '#FFFFFF',
-    secondary: SHASHTNA_THEME.colors.textSecondary,
-    muted: SHASHTNA_THEME.colors.textMuted,
-    border: SHASHTNA_THEME.colors.border,
-    primary: SHASHTNA_THEME.colors.primaryBright,
-    primarySoft: SHASHTNA_THEME.colors.primarySoft,
+  const shared = usePalette();
+  const { accent, customAccent, setAccent } = useAppPreferences();
+  // Same unified palette as the rest of the app (warm ivory in light mode).
+  const palette = {
+    background: shared.background,
+    surface: shared.surface,
+    surfaceSoft: light ? shared.surfaceElevated : SHASHTNA_THEME.colors.glassSoft,
+    text: shared.text,
+    secondary: shared.secondary,
+    muted: shared.muted,
+    border: shared.border,
+    primary: shared.primary,
+    primarySoft: shared.primarySoft,
   };
 
   const qualities: Array<[PreferredQuality,string,string]> = ar ? [
@@ -106,6 +101,17 @@ export default function SettingsScreen({
             <OptionCard icon="sun" title={ar ? 'أبيض' : 'Light'} sub={ar ? 'نهاري' : 'Day'} selected={light} onPress={()=>setThemeMode('light')} palette={palette}/>
           </View>
         </View>
+
+        <AccentPicker
+          ar={ar}
+          accent={accent}
+          customAccent={customAccent}
+          onSelect={setAccent}
+          palette={shared}
+          sectionStyle={[styles.section, { borderColor: palette.border, backgroundColor: palette.surfaceSoft }]}
+          titleStyle={[styles.sectionTitle, { color: palette.text }]}
+          subStyle={[styles.sectionSub, { color: palette.muted }]}
+        />
 
         <View style={[styles.section, { borderColor: palette.border, backgroundColor: palette.surfaceSoft }]}>
           <Text style={[styles.sectionTitle, { color: palette.text }]}>{ar ? 'جودة البث الافتراضية' : 'Default stream quality'}</Text>

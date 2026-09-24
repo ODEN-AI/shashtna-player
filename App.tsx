@@ -33,7 +33,7 @@ import AppIcon, { AppIconName } from './src/components/common/AppIcon';
 import { AppPreferencesProvider, useAppPreferences } from './src/design/AppPreferencesContext';
 import { focusStyle, usePalette } from './src/design/palette';
 import AppShell, { ShellBackground } from './src/app/AppShell';
-import { AccentId } from './src/features/appearance/accents';
+import { AccentId, resolveAccent } from './src/features/appearance/accents';
 import { DEFAULT_APPEARANCE, loadAppearance, saveAppearance } from './src/features/appearance/appearanceStore';
 import { loadFavorites, saveFavorites } from './src/features/favorites/favoritesStore';
 import SplashScreen from './src/app/SplashScreen';
@@ -1014,7 +1014,7 @@ function AppContent() {
           <ShellBackground />
           <ActivityIndicator
             size="large"
-            color={SHASHTNA_THEME.colors.primaryBright}
+            color={resolveAccent(accent, customAccent).bright}
           />
           <Text style={styles.restoringConnectionTitle}>
             استعادة الاشتراك...

@@ -13,7 +13,7 @@ import {
 import AppIcon, { AppIconName } from '../components/common/AppIcon';
 import { BRAND, BRAND_ASSETS } from '../design/brand';
 import { useDeviceClass } from '../design/device';
-import { focusStyle, Palette, usePalette } from '../design/palette';
+import { Palette, usePalette } from '../design/palette';
 import { SHASHTNA_FONT, SHASHTNA_THEME } from '../design/theme';
 
 export type SidebarItem = { id: string; label: string; icon: AppIconName };
@@ -140,6 +140,7 @@ function Sidebar({ items, activeId, onNavigate, onChangeSource, ar }: Props) {
         style={[
           styles.rail,
           side,
+          !isTV && styles.railTouch,
           {
             width,
             experimental_backgroundImage: palette.sidebar,
@@ -224,6 +225,9 @@ const RailButton = memo(function RailButton({
   ar: boolean;
   subtle?: boolean;
 }) {
+  const dark = palette.mode === 'dark';
+  const accent = palette.accent;
+
   return (
     <Pressable
       focusable
@@ -236,39 +240,64 @@ const RailButton = memo(function RailButton({
       style={({ focused, pressed }) => [
         styles.item,
         { flexDirection: rowDirection },
-        selected && { experimental_backgroundImage: SHASHTNA_THEME.gradients.brandSoft },
-        focused && focusStyle(palette, SHASHTNA_THEME.focus.buttonScale),
+        // Focus = temporary remote position: calm surface, thin accent edge,
+        // small glow. No white frame and no scaling (they clipped inside the rail).
+        focused && {
+          backgroundColor: dark ? 'rgba(255,255,255,0.10)' : accent.soft,
+          borderColor: dark ? accent.light : accent.deep,
+          boxShadow: accent.focusShadow,
+        },
         pressed && styles.pressed,
       ]}
     >
-      <View
-        style={[
-          styles.iconBox,
-          selected && { experimental_backgroundImage: SHASHTNA_THEME.gradients.brand, boxShadow: SHASHTNA_THEME.shadows.brand },
-        ]}
-      >
-        <AppIcon
-          name={item.icon}
-          size={subtle ? 19 : 21}
-          color={selected ? '#FFFFFF' : subtle ? palette.muted : palette.secondary}
-        />
-      </View>
-      <Animated.Text
-        numberOfLines={1}
-        style={[
-          styles.label,
-          {
-            opacity: labelOpacity,
-            color: selected ? palette.text : palette.secondary,
-            fontWeight: selected ? '900' : '700',
-            textAlign: ar ? 'right' : 'left',
-            writingDirection: ar ? 'rtl' : 'ltr',
-          },
-        ]}
-      >
-        {item.label}
-      </Animated.Text>
-      {selected ? <View style={[styles.indicator, ar ? styles.indicatorRtl : styles.indicatorLtr]} /> : null}
+      {({ focused }) => (
+        <>
+          {/* Selected = persistent page: accent marker + tinted icon + bold label. */}
+          {selected ? (
+            <View
+              style={[
+                styles.indicator,
+                ar ? styles.indicatorRtl : styles.indicatorLtr,
+                { backgroundColor: accent.bright },
+              ]}
+            />
+          ) : null}
+          <View
+            style={[
+              styles.iconBox,
+              selected && !focused && { backgroundColor: accent.soft },
+              selected && focused && { experimental_backgroundImage: accent.gradient },
+            ]}
+          >
+            <AppIcon
+              name={item.icon}
+              size={subtle ? 19 : 21}
+              color={
+                focused
+                  ? dark ? '#FFFFFF' : accent.deep
+                  : selected
+                    ? dark ? accent.light : accent.deep
+                    : subtle ? palette.muted : palette.secondary
+              }
+            />
+          </View>
+          <Animated.Text
+            numberOfLines={1}
+            style={[
+              styles.label,
+              {
+                opacity: labelOpacity,
+                color: focused || selected ? palette.text : palette.secondary,
+                fontWeight: selected ? '900' : '700',
+                textAlign: ar ? 'right' : 'left',
+                writingDirection: ar ? 'rtl' : 'ltr',
+              },
+            ]}
+          >
+            {item.label}
+          </Animated.Text>
+        </>
+      )}
     </Pressable>
   );
 });
@@ -280,11 +309,12 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     zIndex: 40,
-    paddingHorizontal: 10,
+    paddingHorizontal: 12,
     paddingTop: 22,
     paddingBottom: 18,
     overflow: 'hidden',
   },
+  railTouch: { paddingHorizontal: 10 },
   sideLeft: { left: 0 },
   sideRight: { right: 0 },
   railExpandedShadow: { boxShadow: '0px 0px 40px rgba(0,0,0,0.55)' },
@@ -297,20 +327,19 @@ const styles = StyleSheet.create({
   navGuide: { flex: 1, justifyContent: 'center' },
   navList: { gap: 8 },
   item: {
-    height: 56,
-    borderRadius: 18,
-    paddingHorizontal: 4,
+    height: 54,
+    borderRadius: 16,
+    paddingHorizontal: 5,
     alignItems: 'center',
     gap: 12,
-    borderWidth: 2,
+    borderWidth: 1.5,
     borderColor: 'transparent',
-    overflow: 'visible',
   },
-  iconBox: { width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  iconBox: { width: 42, height: 42, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
   label: { flex: 1, fontSize: SHASHTNA_THEME.typography.size.nav, fontFamily: SHASHTNA_FONT.sans },
-  indicator: { position: 'absolute', top: 16, width: 3, height: 20, borderRadius: 2, backgroundColor: SHASHTNA_THEME.colors.primaryBright },
-  indicatorLtr: { left: -8 },
-  indicatorRtl: { right: -8 },
+  indicator: { position: 'absolute', top: 15, width: 4, height: 22, borderRadius: 2 },
+  indicatorLtr: { left: -9 },
+  indicatorRtl: { right: -9 },
   pressed: { opacity: SHASHTNA_THEME.opacity.pressed },
 });
 
