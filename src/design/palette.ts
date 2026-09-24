@@ -4,6 +4,7 @@ import { SHASHTNA_THEME } from './theme';
 export type Palette = {
   mode: 'dark' | 'light';
   background: string;
+  canvas: string;
   backgroundSoft: string;
   surface: string;
   surfaceElevated: string;
@@ -29,11 +30,14 @@ const g = SHASHTNA_THEME.gradients;
 
 export const DARK_PALETTE: Palette = {
   mode: 'dark',
-  background: c.background,
+  // Screens are transparent in dark mode so the AppShell background
+  // (Image 1 + scrim) shows through; use `canvas` where a solid fill is needed.
+  background: 'transparent',
+  canvas: c.background,
   backgroundSoft: c.backgroundSoft,
   surface: c.surface,
   surfaceElevated: c.surfaceElevated,
-  surfaceHover: 'rgba(255,255,255,0.06)',
+  surfaceHover: 'rgba(140,180,255,0.10)',
   border: c.borderSoft,
   borderStrong: c.borderStrong,
   text: c.textPrimary,
@@ -53,6 +57,7 @@ export const DARK_PALETTE: Palette = {
 export const LIGHT_PALETTE: Palette = {
   mode: 'light',
   background: '#F3F6FB',
+  canvas: '#F3F6FB',
   backgroundSoft: '#EAF0F8',
   surface: '#FFFFFF',
   surfaceElevated: '#F6F9FD',
