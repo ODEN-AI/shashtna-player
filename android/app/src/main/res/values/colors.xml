@@ -1,0 +1,4 @@
+<resources>
+    <!-- Matches the app canvas so the window never flashes white before JS loads. -->
+    <color name="shashtna_canvas">#04070D</color>
+</resources>

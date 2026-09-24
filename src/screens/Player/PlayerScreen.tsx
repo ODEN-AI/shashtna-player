@@ -213,71 +213,6 @@ const {
 } =
   Dimensions.get('window');
 
-function formatTime(
-  seconds: number,
-) {
-  if (
-    !Number.isFinite(
-      seconds,
-    ) ||
-    seconds < 0
-  ) {
-    return '00:00';
-  }
-
-  const total =
-    Math.floor(
-      seconds,
-    );
-
-  const hours =
-    Math.floor(
-      total / 3600,
-    );
-
-  const minutes =
-    Math.floor(
-      (total % 3600) /
-        60,
-    );
-
-  const secs =
-    total % 60;
-
-  if (
-    hours > 0
-  ) {
-    return `${hours
-      .toString()
-      .padStart(
-        2,
-        '0',
-      )}:${minutes
-      .toString()
-      .padStart(
-        2,
-        '0',
-      )}:${secs
-      .toString()
-      .padStart(
-        2,
-        '0',
-      )}`;
-  }
-
-  return `${minutes
-    .toString()
-    .padStart(
-      2,
-      '0',
-    )}:${secs
-    .toString()
-    .padStart(
-      2,
-      '0',
-    )}`;
-}
-
 function getContentLabel(
   channel: M3UChannel,
 ) {
@@ -2477,6 +2412,8 @@ export default function PlayerScreen({
           VIDEO_TRACK_TYPE.AUTO,
       },
     );
+    // Reset only when a different item is opened; launch options belong to it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     channel.id,
   ]);
@@ -2548,6 +2485,7 @@ export default function PlayerScreen({
   }, [
     playbackChannel.id,
     isSeriesDetails,
+    progress,
   ]);
 
   useEffect(() => {
@@ -2654,6 +2592,7 @@ export default function PlayerScreen({
         wakeControls();
       },
       [
+        progress,
         wakeControls,
       ],
     );

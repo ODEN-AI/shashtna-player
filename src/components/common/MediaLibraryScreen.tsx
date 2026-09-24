@@ -1,9 +1,7 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Alert,
   FlatList,
   Image,
-  ImageBackground,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -12,7 +10,7 @@ import {
   View,
 } from 'react-native';
 import { M3UChannel } from '../../lib/m3u';
-import { getTmdbMetadata, tmdbImageUrl } from '../../lib/tmdb';
+import { getTmdbMetadata } from '../../lib/tmdb';
 import AppIcon from './AppIcon';
 import { SHASHTNA_FONT, SHASHTNA_THEME } from '../../design/theme';
 import { useAppPreferences } from '../../design/AppPreferencesContext';
@@ -58,26 +56,6 @@ function buildItems(channels: M3UChannel[], type: MediaType): Item[] {
     }
   }
   return [...map.values()];
-}
-
-function useOptionalMetadata(item: Item | undefined, type: MediaType) {
-  const [metadata, setMetadata] = useState<any>(null);
-
-  useEffect(() => {
-    let alive = true;
-    if (!item) {
-      setMetadata(null);
-      return () => { alive = false; };
-    }
-
-    getTmdbMetadata({ ...item.channel, name: item.title }, type)
-      .then(value => { if (alive) setMetadata(value); })
-      .catch(() => {});
-
-    return () => { alive = false; };
-  }, [item?.channel, item?.title, type]);
-
-  return metadata;
 }
 
 function MediaCard({ item, type, onPress, isFavorite, onToggleFavorite, palette, ar }: { item: Item; type: MediaType; onPress: () => void; isFavorite?: boolean; onToggleFavorite?: (channel: M3UChannel) => void; palette: Palette; ar: boolean }) {

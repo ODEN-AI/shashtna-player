@@ -1,4 +1,5 @@
 import React, {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -14,11 +15,9 @@ import {
   Image,
   Linking,
   Pressable,
-  ScrollView,
   StatusBar,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 
@@ -33,7 +32,8 @@ import { SHASHTNA_FONT, SHASHTNA_THEME } from './src/design/theme';
 import AppIcon, { AppIconName } from './src/components/common/AppIcon';
 import { AppPreferencesProvider, useAppPreferences } from './src/design/AppPreferencesContext';
 import { focusStyle, usePalette } from './src/design/palette';
-import AppShell from './src/app/AppShell';
+import AppShell, { ShellBackground } from './src/app/AppShell';
+import SplashScreen from './src/app/SplashScreen';
 import { ContinueWatchingEntry } from './src/features/continueWatching/continueWatchingStore';
 import { Advertisement } from './src/features/ads/types';
 import Sidebar from './src/navigation/Sidebar';
@@ -41,26 +41,15 @@ import Sidebar from './src/navigation/Sidebar';
 import {
   M3UChannel,
   M3UContentType,
-  buildXtreamM3UUrl,
   downloadAndParseM3U,
   getSeriesFirstEpisode,
 } from './src/lib/m3u';
-
-import {
-  getTmdbMetadata,
-  tmdbImageUrl,
-  TmdbMediaMetadata,
-} from './src/lib/tmdb';
 
 import {
   clearConnectionSource,
   loadConnectionSource,
   saveConnectionSource,
 } from './src/lib/connectionSession';
-
-type ConnectionMode =
-  | 'm3u'
-  | 'xtream';
 
 type ContentType =
   M3UContentType;
@@ -562,7 +551,7 @@ const fav = StyleSheet.create({
   pressed: { opacity: 0.84 },
 });
 
-function App() {
+function AppContent() {
   const [
     channels,
     setChannels,
@@ -972,6 +961,7 @@ function App() {
         }}
       >
         <View style={[styles.container, styles.restoringConnectionScreen]}>
+          <ShellBackground />
           <ActivityIndicator
             size="large"
             color={SHASHTNA_THEME.colors.primaryBright}
@@ -1252,6 +1242,11 @@ function App() {
 
 const styles =
   StyleSheet.create({
+    root: {
+      flex: 1,
+      backgroundColor: SHASHTNA_THEME.colors.background,
+    },
+
     container: {
       flex: 1,
       backgroundColor:
@@ -1279,5 +1274,18 @@ const styles =
       flex: 1,
     },
   });
+
+/** Root: the app plus the launch splash layered on top while it starts up. */
+function App() {
+  const [splashDone, setSplashDone] = useState(false);
+  const finishSplash = useCallback(() => setSplashDone(true), []);
+
+  return (
+    <View style={styles.root}>
+      <AppContent />
+      {splashDone ? null : <SplashScreen onFinish={finishSplash} />}
+    </View>
+  );
+}
 
 export default App;

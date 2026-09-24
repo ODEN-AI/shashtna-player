@@ -1,11 +1,13 @@
 <resources>
 
-    <!-- Base application theme. -->
+    <!-- Android 12+ always shows a system splash (launcher icon on a solid colour).
+         Give it the same canvas colour so it blends into the in-app splash. -->
     <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
         <item name="android:editTextBackground">@drawable/rn_edit_text_material</item>
         <item name="android:windowBackground">@color/shashtna_canvas</item>
         <item name="android:statusBarColor">@color/shashtna_canvas</item>
         <item name="android:navigationBarColor">@color/shashtna_canvas</item>
+        <item name="android:windowSplashScreenBackground">@color/shashtna_canvas</item>
     </style>
 
 </resources>
