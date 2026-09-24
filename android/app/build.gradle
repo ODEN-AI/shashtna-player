@@ -45,7 +45,13 @@ android {
 
     signingConfigs {
         debug {
-            storeFile file('debug.keystore')
+            // *.keystore is git-ignored, so a fresh clone has no android/app/debug.keystore.
+            // Fall back to the standard Android debug keystore (created by AGP when missing);
+            // both use androiddebugkey / android.
+            def projectDebugKeystore = file('debug.keystore')
+            storeFile projectDebugKeystore.exists()
+                ? projectDebugKeystore
+                : file("${System.getProperty('user.home')}/.android/debug.keystore")
             storePassword 'android'
             keyAlias 'androiddebugkey'
             keyPassword 'android'
@@ -76,9 +82,13 @@ android {
 
 dependencies {
     implementation("com.facebook.react:react-android")
-    implementation files("$rootDir/../tools/hermes/hermes-android-classes.jar")
 
     if (hermesEnabled.toBoolean()) {
+        // The React Native Gradle plugin substitutes this with
+        // com.facebook.hermes:hermes-android (currently 0.14.0), which ships both the
+        // Java classes and libhermesvm.so for every ABI and build type. Do not add a
+        // second copy of those classes (e.g. an extracted classes jar) or of the .so
+        // files under src/main/jniLibs: that duplicates the AAR.
         implementation("com.facebook.react:hermes-android")
     } else {
         implementation jscFlavor
