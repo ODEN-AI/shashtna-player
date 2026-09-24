@@ -7,6 +7,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import HScroll from '../../components/layout/HScroll';
 import { M3UChannel } from '../../lib/m3u';
 import { getRecentTmdbCatalog, tmdbImageUrl, TmdbMediaMetadata, TmdbRecentItem } from '../../lib/tmdb';
 import { SHASHTNA_FONT, SHASHTNA_THEME } from '../../design/theme';
@@ -419,11 +420,11 @@ export default function HomeScreen({
         {continueWatching.length ? (
           <View style={styles.section}>
             <SectionHeader title={ar ? 'متابعة المشاهدة' : 'Continue watching'} palette={palette} ar={ar} />
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.row, { flexDirection: rowDirection }]}>
+            <HScroll ar={ar} contentContainerStyle={styles.row}>
               {continueWatching.map(entry => (
                 <ContinueCard key={entry.key} entry={entry} onPress={() => onResume(entry)} palette={palette} ar={ar} />
               ))}
-            </ScrollView>
+            </HScroll>
           </View>
         ) : null}
 
@@ -592,11 +593,7 @@ function MediaRow({
   return (
     <View style={styles.section}>
       <SectionHeader title={title} action={action} actionIcon={actionIcon} onAction={onAction} palette={palette} ar={ar} />
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={[styles.row, { flexDirection: ar ? 'row-reverse' : 'row' }]}
-      >
+      <HScroll ar={ar} contentContainerStyle={styles.row}>
         {items.map(item => (
           <PosterCard
             key={`${keyPrefix}:${item.type}:${item.channel.id}`}
@@ -608,7 +605,7 @@ function MediaRow({
             ar={ar}
           />
         ))}
-      </ScrollView>
+      </HScroll>
     </View>
   );
 }

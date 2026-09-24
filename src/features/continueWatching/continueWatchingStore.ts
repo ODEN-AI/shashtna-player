@@ -113,3 +113,15 @@ export function useContinueWatching(): ContinueWatchingEntry[] {
   }, []);
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
+
+/** Saved progress for one item (movie or episode), or null. */
+export function getProgress(item: M3UChannel): { position: number; duration: number; ratio: number } | null {
+  const entry = entries.find(e => e.key === continueWatchingKey(item));
+  if (!entry || entry.duration <= 0) return null;
+  return { position: entry.position, duration: entry.duration, ratio: Math.min(1, entry.position / entry.duration) };
+}
+
+/** Most recently watched episode of a series (matched by the series channel id). */
+export function getLatestEpisodeFor(series: M3UChannel): ContinueWatchingEntry | null {
+  return entries.find(e => e.parent && String(e.parent.id) === String(series.id)) || null;
+}

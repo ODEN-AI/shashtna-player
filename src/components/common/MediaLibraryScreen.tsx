@@ -3,12 +3,12 @@ import {
   FlatList,
   Image,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import HScroll from '../layout/HScroll';
 import { M3UChannel } from '../../lib/m3u';
 import { getTmdbMetadata } from '../../lib/tmdb';
 import AppIcon from './AppIcon';
@@ -239,9 +239,9 @@ export default function MediaLibraryScreen({ type, title, channels, onOpenPlayer
       </View>
 
       <View style={[styles.toolbar, { flexDirection: rowDirection }]}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll} contentContainerStyle={[styles.chipRow, { flexDirection: rowDirection }]}>
+        <HScroll ar={ar} style={styles.chipScroll} contentContainerStyle={styles.chipRow}>
           {groups.map(g => <Chip key={g} label={g} active={group === g} onPress={() => setGroup(g)} palette={palette} />)}
-        </ScrollView>
+        </HScroll>
         <View style={[styles.sortGroup, { flexDirection: rowDirection, backgroundColor: palette.surface, borderColor: palette.border }]}>
           <Chip label={ar ? 'الأحدث' : 'Latest'} active={sort === 'latest'} onPress={() => setSort('latest')} palette={palette} />
           <Chip label={ar ? 'التقييم' : 'Rating'} active={sort === 'rating'} onPress={() => setSort('rating')} icon="star" palette={palette} />

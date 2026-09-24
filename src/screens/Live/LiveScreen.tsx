@@ -3,13 +3,13 @@ import {
   FlatList,
   Image,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TVFocusGuideView,
   View,
 } from 'react-native';
+import HScroll from '../../components/layout/HScroll';
 
 import AppIcon from '../../components/common/AppIcon';
 import { useAppPreferences } from '../../design/AppPreferencesContext';
@@ -205,12 +205,7 @@ export default function LiveScreen({ channels, onOpenPlayer, onBackHome, initial
     return (
       <View style={[styles.screen, styles.screenCompact, { backgroundColor: palette.background }]}>
         {header}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.chipScroll}
-          contentContainerStyle={[styles.chips, { flexDirection: rowDirection }]}
-        >
+        <HScroll ar={ar} style={styles.chipScroll} contentContainerStyle={styles.chips}>
           {groups.map(g => {
             const active = g.key === group;
             return (
@@ -230,7 +225,7 @@ export default function LiveScreen({ channels, onOpenPlayer, onBackHome, initial
               </Pressable>
             );
           })}
-        </ScrollView>
+        </HScroll>
         {channelList}
       </View>
     );

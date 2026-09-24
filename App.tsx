@@ -399,6 +399,8 @@ function Player({
   autoplay,
   subtitles,
   options,
+  isFavorite,
+  onToggleFavorite,
 }: {
   channel: M3UChannel;
   onBack: (lastPlayed?: M3UChannel) => void;
@@ -406,6 +408,8 @@ function Player({
   autoplay: boolean;
   subtitles: boolean;
   options: PlayerLaunchOptions;
+  isFavorite: boolean;
+  onToggleFavorite: () => void;
 }) {
   return (
     <PlayerScreen
@@ -417,6 +421,8 @@ function Player({
       liveQueue={options.liveQueue}
       startEpisode={options.startEpisode}
       autoStart={options.autoStart}
+      isFavorite={isFavorite}
+      onToggleFavorite={onToggleFavorite}
     />
   );
 }
@@ -1084,6 +1090,8 @@ function AppContent() {
               subtitles
             }
             options={playerOptions}
+            isFavorite={favoriteIds.has(favoriteKey(selectedChannel))}
+            onToggleFavorite={() => toggleFavorite(selectedChannel)}
             onBack={lastPlayed => {
               if (lastPlayed?.contentType === 'live') {
                 // Lets Live TV scroll back to and focus the channel just watched.
