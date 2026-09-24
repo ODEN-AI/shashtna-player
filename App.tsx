@@ -31,6 +31,7 @@ import SettingsScreen, { PreferredQuality } from './src/screens/Settings/Setting
 import { SHASHTNA_FONT, SHASHTNA_THEME } from './src/design/theme';
 import AppIcon, { AppIconName } from './src/components/common/AppIcon';
 import { AppPreferencesProvider, useAppPreferences } from './src/design/AppPreferencesContext';
+import { focusStyle, Palette, usePalette } from './src/design/palette';
 
 import {
   M3UChannel,
@@ -269,35 +270,20 @@ function buildMediaDisplayItems(
   );
 }
 
-function BrandMark() {
+const BRAND_NAME_AR = 'عبدالرحمن IPTV';
+const BRAND_NAME_EN = 'ABDULRAHMAN IPTV';
+
+function BrandMark({ ar, palette }: { ar: boolean; palette: Palette }) {
   return (
-    <View style={styles.brandWrap}>
-      <View style={styles.brandIcon}>
-        <Text
-          style={
-            styles.brandIconText
-          }
-        >
-          ش
-        </Text>
+    <View style={[sb.brandWrap, { flexDirection: ar ? 'row-reverse' : 'row' }]}>
+      <View style={sb.brandIcon}>
+        <AppIcon name="play" size={18} color="#FFFFFF" />
       </View>
-
-      <View>
-        <Text
-          style={
-            styles.brandArabic
-          }
-        >
-          عبدالرحمن IPTV
+      <View style={sb.brandText}>
+        <Text numberOfLines={1} style={[sb.brandName, { color: palette.text, textAlign: ar ? 'right' : 'left' }]}>
+          {ar ? BRAND_NAME_AR : BRAND_NAME_EN}
         </Text>
-
-        <Text
-          style={
-            styles.brandEnglish
-          }
-        >
-          ABDULRAHMAN IPTV
-        </Text>
+        <Text style={[sb.brandTag, { color: palette.primaryText, textAlign: ar ? 'right' : 'left' }]}>PLAYER</Text>
       </View>
     </View>
   );
@@ -308,7 +294,6 @@ function Sidebar({
   onNavigate,
   onChangeSource,
   language = 'ar',
-  themeMode = 'dark',
 }: {
   activeNav: string;
   onNavigate: (id: string) => void;
@@ -316,161 +301,124 @@ function Sidebar({
   language?: AppLanguage;
   themeMode?: ThemeMode;
 }) {
+  const palette = usePalette();
+  const ar = language === 'ar';
   const navItems = getNavItems(language);
-  const light = themeMode === 'light';
-  const sidebarBg = light ? '#FFFFFF' : '#071321';
-  const border = light ? '#DCE7F2' : '#1C3A5A';
-  const text = light ? '#23364A' : '#D9E5F2';
+  const rowDirection = ar ? 'row-reverse' : 'row';
+
   return (
     <View
-      style={[styles.sidebar, { backgroundColor: sidebarBg, borderColor: border, borderRightWidth: language === 'ar' ? 0 : 1, borderLeftWidth: language === 'ar' ? 1 : 0 }]}
+      style={[
+        sb.sidebar,
+        {
+          experimental_backgroundImage: palette.sidebar,
+          borderColor: palette.border,
+          borderLeftWidth: ar ? 1 : 0,
+          borderRightWidth: ar ? 0 : 1,
+        },
+      ]}
     >
-      <BrandMark />
+      <BrandMark ar={ar} palette={palette} />
 
-      <View
-        style={
-          styles.sidebarDivider
-        }
-      />
-
-      <Text
-        style={
-          styles.sidebarCaption
-        }
-      >
-        {language === 'ar' ? 'القائمة الرئيسية' : 'Main menu'}
+      <Text style={[sb.caption, { color: palette.muted, textAlign: ar ? 'right' : 'left' }]}>
+        {ar ? 'القائمة' : 'MENU'}
       </Text>
 
-      <View
-        style={
-          styles.navigation
-        }
-      >
-        {navItems.map(
-          item => {
-            const active =
-              activeNav ===
-              item.id;
-
-            return (
-              <Pressable
-                key={
-                  item.id
-                }
-                focusable
-                accessibilityRole="button"
-                accessibilityLabel={
-                  item.label
-                }
-                onPress={() =>
-                  onNavigate(
-                    item.id,
-                  )
-                }
-                style={({
-                  focused,
-                  pressed,
-                }) => [
-                  styles.navItem,
-                  { flexDirection: language === 'ar' ? 'row-reverse' : 'row', borderColor: light ? '#DDE8F3' : 'transparent' },
-                  active && { backgroundColor: light ? '#EAF3FF' : SHASHTNA_THEME.colors.primarySoft, borderColor: light ? '#8EC4FF' : SHASHTNA_THEME.colors.primary },
-                  focused &&
-                    styles.navItemFocused,
-                  pressed &&
-                    styles.navItemPressed,
+      <View style={sb.navigation}>
+        {navItems.map(item => {
+          const active = activeNav === item.id;
+          return (
+            <Pressable
+              key={item.id}
+              focusable
+              accessibilityRole="button"
+              accessibilityLabel={item.label}
+              accessibilityState={{ selected: active }}
+              onPress={() => onNavigate(item.id)}
+              style={({ focused, pressed }) => [
+                sb.navItem,
+                { flexDirection: rowDirection },
+                active && { experimental_backgroundImage: SHASHTNA_THEME.gradients.brandSoft, borderColor: palette.primarySoft },
+                focused && focusStyle(palette, SHASHTNA_THEME.focus.buttonScale),
+                pressed && sb.pressed,
+              ]}
+            >
+              <View
+                style={[
+                  sb.navIcon,
+                  { backgroundColor: palette.surfaceHover },
+                  active && { experimental_backgroundImage: SHASHTNA_THEME.gradients.brand, boxShadow: SHASHTNA_THEME.shadows.brand },
                 ]}
               >
-                <View
-                  style={[
-                    styles.navIconBox,
-                    active &&
-                      styles.navIconBoxActive,
-                  ]}
-                >
-                  <AppIcon
-                    name={item.icon}
-                    active={active}
-                    size={20}
-                  />
-                </View>
-
-                <Text
-                  style={[
-                    styles.navLabel,
-                    { writingDirection: language === 'ar' ? 'rtl' : 'ltr', textAlign: language === 'ar' ? 'right' : 'left', color: active ? (light ? '#0867CE' : '#FFFFFF') : text },
-                    active && styles.navLabelActive,
-                  ]}
-                >
+                <AppIcon name={item.icon} size={18} color={active ? '#FFFFFF' : palette.secondary} />
+              </View>
+              <Text
+                numberOfLines={1}
+                style={[
+                  sb.navLabel,
                   {
-                    item.label
-                  }
-                </Text>
-
-                {active ? (
-                  <View
-                    style={[styles.navActiveLine, language === 'ar' ? styles.navActiveLineRtl : styles.navActiveLineLtr]}
-                  />
-                ) : null}
-              </Pressable>
-            );
-          },
-        )}
+                    color: active ? palette.text : palette.secondary,
+                    fontWeight: active ? '900' : '700',
+                    writingDirection: ar ? 'rtl' : 'ltr',
+                    textAlign: ar ? 'right' : 'left',
+                  },
+                ]}
+              >
+                {item.label}
+              </Text>
+              {active ? <View style={[sb.activeBar, ar ? sb.activeBarRtl : sb.activeBarLtr]} /> : null}
+            </Pressable>
+          );
+        })}
       </View>
 
-      <View
-        style={
-          styles.sidebarBottom
-        }
+      <Pressable
+        focusable
+        accessibilityRole="button"
+        onPress={onChangeSource}
+        style={({ focused, pressed }) => [
+          sb.sourceButton,
+          { flexDirection: rowDirection, backgroundColor: palette.surface, borderColor: palette.border },
+          focused && focusStyle(palette, SHASHTNA_THEME.focus.buttonScale),
+          pressed && sb.pressed,
+        ]}
       >
-        <View
-          style={
-            styles.sidebarDividerSmall
-          }
-        />
-
-        <Pressable
-          focusable
-          accessibilityRole="button"
-          onPress={
-            onChangeSource
-          }
-          style={({
-            focused,
-            pressed,
-          }) => [
-            styles.sourceButton,
-            focused &&
-              styles.sourceButtonFocused,
-            pressed &&
-              styles.sourceButtonPressed,
-          ]}
-        >
-          <View style={styles.sourceIconBox}>
-            <AppIcon name="source" size={18} />
-          </View>
-
-          <View>
-            <Text
-              style={
-                styles.sourceTitle
-              }
-            >
-              تغيير المصدر
-            </Text>
-
-            <Text
-              style={
-                styles.sourceSubtitle
-              }
-            >
-              M3U / Xtream
-            </Text>
-          </View>
-        </Pressable>
-      </View>
+        <View style={[sb.sourceIcon, { backgroundColor: palette.primarySoft }]}>
+          <AppIcon name="source" size={16} color={palette.primaryText} />
+        </View>
+        <View style={sb.sourceText}>
+          <Text numberOfLines={1} style={[sb.sourceTitle, { color: palette.text, textAlign: ar ? 'right' : 'left' }]}>
+            {ar ? 'تغيير المصدر' : 'Change source'}
+          </Text>
+          <Text style={[sb.sourceSub, { color: palette.muted, textAlign: ar ? 'right' : 'left' }]}>M3U / Xtream</Text>
+        </View>
+      </Pressable>
     </View>
   );
 }
+
+const sb = StyleSheet.create({
+  sidebar: { width: SHASHTNA_THEME.layout.sidebar, paddingHorizontal: 14, paddingTop: 26, paddingBottom: 22 },
+  brandWrap: { alignItems: 'center', gap: 10, paddingHorizontal: 4 },
+  brandIcon: { width: 40, height: 40, borderRadius: 13, alignItems: 'center', justifyContent: 'center', experimental_backgroundImage: SHASHTNA_THEME.gradients.brand, boxShadow: SHASHTNA_THEME.shadows.brand },
+  brandText: { flex: 1, minWidth: 0 },
+  brandName: { fontSize: 15, fontWeight: '900', fontFamily: SHASHTNA_FONT.sans },
+  brandTag: { fontSize: 9, fontWeight: '900', letterSpacing: 2.4, marginTop: 2 },
+  caption: { fontSize: 11, fontWeight: '900', letterSpacing: 1.2, marginTop: 30, marginBottom: 10, paddingHorizontal: 8 },
+  navigation: { gap: 6 },
+  navItem: { height: 52, borderRadius: 16, paddingHorizontal: 8, alignItems: 'center', gap: 11, borderWidth: 2, borderColor: 'transparent', position: 'relative' },
+  navIcon: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  navLabel: { flex: 1, fontSize: SHASHTNA_THEME.typography.size.nav, fontFamily: SHASHTNA_FONT.sans },
+  activeBar: { position: 'absolute', top: 14, width: 3, height: 20, borderRadius: 2, backgroundColor: SHASHTNA_THEME.colors.primaryBright },
+  activeBarLtr: { left: -9 },
+  activeBarRtl: { right: -9 },
+  sourceButton: { marginTop: 'auto', height: 58, borderRadius: 18, borderWidth: 2, paddingHorizontal: 10, alignItems: 'center', gap: 10 },
+  sourceIcon: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+  sourceText: { flex: 1, minWidth: 0 },
+  sourceTitle: { fontSize: 13, fontWeight: '900' },
+  sourceSub: { fontSize: 11, marginTop: 2, fontWeight: '700' },
+  pressed: { opacity: 0.84 },
+});
 
 function Home({
   channels,
@@ -1335,7 +1283,9 @@ function FavoritesPage({
   onToggleFavorite: (channel: M3UChannel) => void;
 }) {
   const { language } = useAppPreferences();
+  const palette = usePalette();
   const ar = language === 'ar';
+  const rowDirection = ar ? 'row-reverse' : 'row';
   const movieItems = useMemo(() => buildMediaDisplayItems(channels, 'movie'), [channels]);
   const seriesItems = useMemo(() => buildMediaDisplayItems(channels, 'series'), [channels]);
 
@@ -1348,20 +1298,20 @@ function FavoritesPage({
   );
 
   return (
-    <View style={styles.favoritePage}>
-      <View style={styles.favoriteHeaderRow}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.pageEyebrow}>ABDULRAHMAN IPTV</Text>
-          <Text style={styles.pageTitle}>{ar ? 'المفضلة' : 'Favorites'}</Text>
-          <Text style={styles.pageDescription}>
+    <View style={[fav.page, { backgroundColor: palette.background }]}>
+      <View style={[fav.header, { flexDirection: rowDirection }]}>
+        <View style={fav.headerText}>
+          <Text style={[fav.eyebrow, { color: palette.primaryText, textAlign: ar ? 'right' : 'left' }]}>MY LIST</Text>
+          <Text style={[fav.title, { color: palette.text, textAlign: ar ? 'right' : 'left' }]}>{ar ? 'المفضلة' : 'Favorites'}</Text>
+          <Text style={[fav.sub, { color: palette.muted, textAlign: ar ? 'right' : 'left' }]}>
             {items.length
-              ? `${items.length} ${ar ? 'عنصر محفوظ في قائمتك.' : items.length === 1 ? 'item saved to your list.' : 'items saved to your list.'}`
-              : (ar ? 'احفظ الأفلام والمسلسلات التي تريد الرجوع لها بسرعة.' : 'Save movies and series you want to find quickly.')}
+              ? `${items.length} ${ar ? 'عنصر محفوظ في قائمتك' : items.length === 1 ? 'item saved to your list' : 'items saved to your list'}`
+              : ar ? 'احفظ الأفلام والمسلسلات التي تريد الرجوع لها بسرعة.' : 'Save movies and series you want to find quickly.'}
           </Text>
         </View>
-        <View style={styles.favoriteCountPill}>
-          <AppIcon name="favorites" size={15} color={SHASHTNA_THEME.colors.rating} />
-          <Text style={styles.favoriteCountText}>{items.length}</Text>
+        <View style={[fav.countPill, { flexDirection: rowDirection }]}>
+          <AppIcon name="favorite" size={15} color="#FFFFFF" />
+          <Text style={fav.countText}>{items.length}</Text>
         </View>
       </View>
 
@@ -1369,86 +1319,95 @@ function FavoritesPage({
         <FlatList
           data={items}
           keyExtractor={item => `favorite:${item.type}:${item.channel.id}`}
-          numColumns={5}
-          columnWrapperStyle={styles.favoriteGridRow}
-          contentContainerStyle={styles.favoriteGrid}
+          numColumns={SHASHTNA_THEME.layout.gridColumns}
+          columnWrapperStyle={[fav.gridRow, { flexDirection: rowDirection }]}
+          contentContainerStyle={fav.grid}
           showsVerticalScrollIndicator={false}
           renderItem={({ item }) => {
             const poster = item.channel.logo || '';
+            const typeLabel = item.type === 'movie' ? (ar ? 'فيلم' : 'Movie') : ar ? 'مسلسل' : 'Series';
             return (
-              <Pressable
-                focusable
-                onPress={() => onOpenPlayer(item.channel)}
-                style={({ focused, pressed }) => [
-                  styles.favoriteMediaCard,
-                  focused && styles.favoriteMediaCardFocused,
-                  pressed && styles.favoriteMediaCardPressed,
-                ]}
-              >
-                <View style={styles.favoritePoster}>
+              <View style={fav.card}>
+                <Pressable
+                  focusable
+                  accessibilityLabel={item.title}
+                  onPress={() => onOpenPlayer(item.channel)}
+                  style={({ focused, pressed }) => [
+                    fav.poster,
+                    { backgroundColor: palette.surfaceElevated, borderColor: palette.border },
+                    focused && focusStyle(palette),
+                    pressed && fav.pressed,
+                  ]}
+                >
                   {poster ? (
-                    <Image
-                      source={{ uri: poster }}
-                      style={styles.favoritePosterImage}
-                      resizeMode="cover"
-                    />
+                    <Image source={{ uri: poster }} style={fav.posterImage} resizeMode="cover" />
                   ) : (
-                    <View style={styles.favoritePosterFallback}>
-                      <AppIcon
-                        name={item.type === 'movie' ? 'movies' : 'series'}
-                        size={28}
-                      />
+                    <View style={fav.posterFallback}>
+                      <AppIcon name={item.type === 'movie' ? 'movies' : 'series'} size={28} color={palette.muted} />
                     </View>
                   )}
-
-                  <Pressable
-                    focusable
-                    accessibilityRole="button"
-                    accessibilityLabel={ar ? 'إزالة من قائمتي' : 'Remove from My List'}
-                    onPress={(event: any) => {
-                      event?.stopPropagation?.();
-                      onToggleFavorite(item.channel);
-                    }}
-                    style={({ focused, pressed }) => [
-                      styles.favoriteRemove,
-                      focused && styles.focusRing,
-                      pressed && styles.pressed,
-                    ]}
-                  >
-                    <AppIcon
-                      name="favorite"
-                      size={13}
-                      color={SHASHTNA_THEME.colors.rating}
-                    />
-                  </Pressable>
-
-                  <View style={styles.favoriteTypeBadge}>
-                    <Text style={styles.favoriteTypeText}>
-                      {item.type === 'movie' ? (ar ? 'فيلم' : 'Movie') : (ar ? 'مسلسل' : 'Series')}
-                    </Text>
-                  </View>
-                </View>
-                <Text numberOfLines={2} style={styles.favoriteMediaTitle}>
-                  {item.title}
-                </Text>
-              </Pressable>
+                </Pressable>
+                <Pressable
+                  focusable
+                  accessibilityRole="button"
+                  accessibilityLabel={ar ? 'إزالة من قائمتي' : 'Remove from My List'}
+                  onPress={() => onToggleFavorite(item.channel)}
+                  style={({ focused, pressed }) => [
+                    fav.remove,
+                    ar ? fav.removeRtl : fav.removeLtr,
+                    focused && focusStyle(palette, SHASHTNA_THEME.focus.iconScale),
+                    pressed && fav.pressed,
+                  ]}
+                >
+                  <AppIcon name="favorite" size={14} color="#FFFFFF" />
+                </Pressable>
+                <Text numberOfLines={1} style={[fav.cardTitle, { color: palette.text, textAlign: ar ? 'right' : 'left' }]}>{item.title}</Text>
+                <Text numberOfLines={1} style={[fav.cardMeta, { color: palette.muted, textAlign: ar ? 'right' : 'left' }]}>{typeLabel}</Text>
+              </View>
             );
           }}
         />
       ) : (
-        <View style={styles.favoriteEmpty}>
-          <View style={styles.favoriteEmptyIcon}>
-            <AppIcon name="favorites" size={30} active />
+        <View style={fav.empty}>
+          <View style={fav.emptyIcon}>
+            <AppIcon name="favorites" size={30} color="#FFFFFF" />
           </View>
-          <Text style={styles.favoriteTitle}>{ar ? 'قائمتك فارغة حالياً' : 'Your list is empty'}</Text>
-          <Text style={styles.favoriteText}>
-            {ar ? 'من بطاقات الأفلام والمسلسلات اضغط رمز القلب لإضافة المحتوى إلى هنا.' : 'Press the heart on any movie or series card to add it here.'}
+          <Text style={[fav.emptyTitle, { color: palette.text }]}>{ar ? 'قائمتك فارغة حالياً' : 'Your list is empty'}</Text>
+          <Text style={[fav.emptyText, { color: palette.muted }]}>
+            {ar ? 'اضغط رمز القلب على أي فيلم أو مسلسل حتى يظهر هنا.' : 'Press the heart on any movie or series card to add it here.'}
           </Text>
         </View>
       )}
     </View>
   );
 }
+
+const fav = StyleSheet.create({
+  page: { flex: 1, paddingHorizontal: SHASHTNA_THEME.layout.contentX, paddingTop: 26 },
+  header: { alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 22, gap: 20 },
+  headerText: { flex: 1 },
+  eyebrow: { fontSize: 12, fontWeight: '900', letterSpacing: 2.4 },
+  title: { fontSize: SHASHTNA_THEME.typography.size.pageTitle, lineHeight: SHASHTNA_THEME.typography.lineHeight.pageTitle, fontWeight: '900', fontFamily: SHASHTNA_FONT.display, marginTop: 4 },
+  sub: { fontSize: 15, marginTop: 2, fontWeight: '700' },
+  countPill: { height: 40, paddingHorizontal: 16, borderRadius: 20, alignItems: 'center', gap: 8, experimental_backgroundImage: 'linear-gradient(120deg, #FF4D7A 0%, #FF8A5B 100%)' },
+  countText: { color: '#FFFFFF', fontSize: 17, fontWeight: '900' },
+  grid: { paddingBottom: 40, paddingTop: 6, paddingHorizontal: 4 },
+  gridRow: { gap: 16, marginBottom: 22 },
+  card: { width: 128, position: 'relative' },
+  poster: { width: 128, height: 192, borderRadius: 16, overflow: 'hidden', borderWidth: 1 },
+  posterImage: { width: '100%', height: '100%' },
+  posterFallback: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  remove: { position: 'absolute', top: 8, width: 32, height: 32, borderRadius: 16, backgroundColor: '#FF4D7A', borderWidth: 1, borderColor: 'rgba(255,255,255,0.4)', alignItems: 'center', justifyContent: 'center', zIndex: 60 },
+  removeLtr: { right: 8 },
+  removeRtl: { left: 8 },
+  cardTitle: { fontSize: 15, lineHeight: 21, fontWeight: '800', marginTop: 10, paddingHorizontal: 2 },
+  cardMeta: { fontSize: 12, marginTop: 2, fontWeight: '700', paddingHorizontal: 2 },
+  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingBottom: 60 },
+  emptyIcon: { width: 76, height: 76, borderRadius: 26, alignItems: 'center', justifyContent: 'center', experimental_backgroundImage: 'linear-gradient(120deg, #FF4D7A 0%, #FF8A5B 100%)' },
+  emptyTitle: { fontSize: 22, fontWeight: '900', marginTop: 18 },
+  emptyText: { fontSize: 15, marginTop: 6, textAlign: 'center', maxWidth: 460, lineHeight: 24 },
+  pressed: { opacity: 0.84 },
+});
 
 function App() {
   const [

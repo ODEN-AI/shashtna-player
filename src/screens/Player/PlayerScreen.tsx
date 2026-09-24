@@ -582,10 +582,10 @@ function TrackMenu({
               }
             >
               {isAudio
-                ? 'Ø§Ø®ØªÙŠØ§Ø± Ø§Ù„ØµÙˆØª'
+                ? 'اختيار الصوت'
                 : isSubtitle
-                  ? 'Ø§Ø®ØªÙŠØ§Ø± Ø§Ù„ØªØ±Ø¬Ù…Ø©'
-                  : 'Ø§Ø®ØªÙŠØ§Ø± Ø§Ù„Ø¬ÙˆØ¯Ø©'}
+                  ? 'اختيار الترجمة'
+                  : 'اختيار الجودة'}
             </Text>
 
             <Pressable
@@ -606,7 +606,7 @@ function TrackMenu({
                   styles.closeButtonText
                 }
               >
-                Ã—
+                ×
               </Text>
             </Pressable>
           </View>
@@ -634,8 +634,8 @@ function TrackMenu({
                 }
               >
                 {isAudio
-                  ? 'Ù„Ø§ ØªÙˆØ¬Ø¯ Ù…Ø³Ø§Ø±Ø§Øª ØµÙˆØª Ø¥Ø¶Ø§ÙÙŠØ©'
-                  : 'Ù„Ø§ ØªÙˆØ¬Ø¯ ØªØ±Ø¬Ù…Ø© Ù…ØªØ§Ø­Ø©'}
+                  ? 'لا توجد مسارات صوت إضافية'
+                  : 'لا توجد ترجمة متاحة'}
               </Text>
 
               <Text
@@ -643,7 +643,7 @@ function TrackMenu({
                   styles.emptyTracksDescription
                 }
               >
-                Ù‡Ø°Ø§ ÙŠØ¹ØªÙ…Ø¯ Ø¹Ù„Ù‰ Ø§Ù„Ù…ØµØ¯Ø± Ù†ÙØ³Ù‡ ÙˆÙ‡Ù„ Ø§Ù„Ø¨Ø« ÙŠÙˆÙØ± Ø£ÙƒØ«Ø± Ù…Ù† Ù…Ø³Ø§Ø±.
+                هذا يعتمد على المصدر نفسه وهل البث يوفر أكثر من مسار.
               </Text>
             </View>
           ) : (
@@ -684,7 +684,7 @@ function TrackMenu({
                           styles.trackItemTitle
                         }
                       >
-                        Ø¥ÙŠÙ‚Ø§Ù Ø§Ù„ØªØ±Ø¬Ù…Ø©
+                        إيقاف الترجمة
                       </Text>
 
                       <Text
@@ -692,7 +692,7 @@ function TrackMenu({
                           styles.trackItemSubtitle
                         }
                       >
-                        Ø¨Ø¯ÙˆÙ† ØªØ±Ø¬Ù…Ø©
+                        بدون ترجمة
                       </Text>
                     </View>
 
@@ -703,7 +703,7 @@ function TrackMenu({
                           styles.checkMark
                         }
                       >
-                        âœ“
+                        ✓
                       </Text>
                     )}
                   </Pressable>
@@ -784,7 +784,7 @@ function TrackMenu({
                             styles.checkMark
                           }
                         >
-                          âœ“
+                          ✓
                         </Text>
                       )}
                     </Pressable>
@@ -846,7 +846,7 @@ function QualityMenu({
                 styles.trackPanelTitle
               }
             >
-              Ø§Ø®ØªÙŠØ§Ø± Ø§Ù„Ø¬ÙˆØ¯Ø©
+              اختيار الجودة
             </Text>
 
             <Pressable
@@ -867,7 +867,7 @@ function QualityMenu({
                   styles.closeButtonText
                 }
               >
-                Ã—
+                ×
               </Text>
             </Pressable>
           </View>
@@ -907,7 +907,7 @@ function QualityMenu({
                     styles.trackItemTitle
                   }
                 >
-                  ØªÙ„Ù‚Ø§Ø¦ÙŠ
+                  تلقائي
                 </Text>
 
                 <Text
@@ -915,7 +915,7 @@ function QualityMenu({
                     styles.trackItemSubtitle
                   }
                 >
-                  ÙŠØ®ØªØ§Ø± Ø§Ù„Ù…Ø´ØºÙ„ Ø£ÙØ¶Ù„ Ø¬ÙˆØ¯Ø© Ø­Ø³Ø¨ Ø§Ù„Ø§ØªØµØ§Ù„
+                  يختار المشغل أفضل جودة حسب الاتصال
                 </Text>
               </View>
 
@@ -926,7 +926,7 @@ function QualityMenu({
                     styles.checkMark
                   }
                 >
-                  âœ“
+                  ✓
                 </Text>
               )}
             </Pressable>
@@ -1003,7 +1003,7 @@ function QualityMenu({
                         {[
                           track.width &&
                           track.height
-                            ? `${track.width}Ã—${track.height}`
+                            ? `${track.width}×${track.height}`
                             : '',
                           formatBitrate(
                             track.bitrate,
@@ -1013,7 +1013,7 @@ function QualityMenu({
                             Boolean,
                           )
                           .join(
-                            ' â€¢ ',
+                            ' • ',
                           ) ||
                           'Video Track'}
                       </Text>
@@ -1025,7 +1025,7 @@ function QualityMenu({
                           styles.checkMark
                         }
                       >
-                        âœ“
+                        ✓
                       </Text>
                     )}
                   </Pressable>
@@ -1120,7 +1120,7 @@ function SeriesDetailsView({
             err instanceof
               Error
               ? err.message
-              : 'ØªØ¹Ø°Ø± ØªØ­Ù…ÙŠÙ„ ØªÙØ§ØµÙŠÙ„ Ø§Ù„Ù…Ø³Ù„Ø³Ù„.',
+              : 'تعذر تحميل تفاصيل المسلسل.',
           );
         } finally {
           setLoading(
@@ -1219,8 +1219,8 @@ function SeriesDetailsView({
         }
       >
         <ControlButton
-          icon={ar ? 'â€º' : 'â€¹'}
-          label="Ø±Ø¬ÙˆØ¹"
+          icon={ar ? '›' : '‹'}
+          label="رجوع"
           onPress={
             onBack
           }
@@ -1241,7 +1241,7 @@ function SeriesDetailsView({
               styles.seriesTopTitleText
             }
           >
-            ØªÙØ§ØµÙŠÙ„ Ø§Ù„Ù…Ø³Ù„Ø³Ù„
+            تفاصيل المسلسل
           </Text>
         </View>
       </View>
@@ -1316,7 +1316,7 @@ function SeriesDetailsView({
                       styles.seriesPosterFallbackText
                     }
                   >
-                    Ø´
+                    ش
                   </Text>
                 </View>
               )}
@@ -1376,7 +1376,7 @@ function SeriesDetailsView({
                       styles.seriesMetaText
                     }
                   >
-                    â˜… {rating.toFixed(
+                    ★ {rating.toFixed(
                       1,
                     )}
                   </Text>
@@ -1388,7 +1388,7 @@ function SeriesDetailsView({
                       styles.seriesMetaText
                     }
                   >
-                    {seasons.length} Ù…ÙˆØ§Ø³Ù…
+                    {seasons.length} مواسم
                   </Text>
                 ) : null}
               </View>
@@ -1423,7 +1423,7 @@ function SeriesDetailsView({
                     styles.seriesPlotHero
                   }
                 >
-                  Ù„Ø§ ØªÙˆØ¬Ø¯ Ù‚ØµØ© Ù…ØªÙˆÙØ±Ø© Ù…Ù† Ù…ØµØ¯Ø± Ø§Ù„Ø§Ø´ØªØ±Ø§Ùƒ.
+                  لا توجد قصة متوفرة من مصدر الاشتراك.
                 </Text>
               )}
             </View>
@@ -1448,7 +1448,7 @@ function SeriesDetailsView({
                 styles.seriesLoadingText
               }
             >
-              Ø¬Ø§Ø±ÙŠ ØªØ­Ù…ÙŠÙ„ Ø§Ù„Ù…ÙˆØ§Ø³Ù… ÙˆØ§Ù„Ø­Ù„Ù‚Ø§Øª...
+              جاري تحميل المواسم والحلقات...
             </Text>
           </View>
         ) : error ? (
@@ -1462,7 +1462,7 @@ function SeriesDetailsView({
                 styles.seriesErrorTitle
               }
             >
-              ØªØ¹Ø°Ø± ØªØ­Ù…ÙŠÙ„ ØªÙØ§ØµÙŠÙ„ Ø§Ù„Ù…Ø³Ù„Ø³Ù„
+              تعذر تحميل تفاصيل المسلسل
             </Text>
 
             <Text
@@ -1474,8 +1474,8 @@ function SeriesDetailsView({
             </Text>
 
             <ControlButton
-              icon="â†»"
-              label="Ø¥Ø¹Ø§Ø¯Ø© Ø§Ù„Ù…Ø­Ø§ÙˆÙ„Ø©"
+              icon="↻"
+              label="إعادة المحاولة"
               onPress={
                 loadDetails
               }
@@ -1490,7 +1490,7 @@ function SeriesDetailsView({
                     styles.seriesSectionTitle
                   }
                 >
-                  Ø§Ù„Ù…ÙˆØ§Ø³Ù…
+                  المواسم
                 </Text>
 
                 <ScrollView
@@ -1551,7 +1551,7 @@ function SeriesDetailsView({
                             ]}
                           >
                             {season.name ||
-                              `Ø§Ù„Ù…ÙˆØ³Ù… ${seasonNumber}`}
+                              `الموسم ${seasonNumber}`}
                           </Text>
 
                           <Text
@@ -1565,7 +1565,7 @@ function SeriesDetailsView({
                               season.episode_count ||
                                 0,
                             ) || 0}{' '}
-                            Ø­Ù„Ù‚Ø©
+                            حلقة
                           </Text>
                         </Pressable>
                       );
@@ -1585,7 +1585,7 @@ function SeriesDetailsView({
                   styles.seriesSectionTitle
                 }
               >
-                Ø­Ù„Ù‚Ø§Øª Ø§Ù„Ù…ÙˆØ³Ù…{' '}
+                حلقات الموسم{' '}
                 {selectedSeason}
               </Text>
 
@@ -1594,7 +1594,7 @@ function SeriesDetailsView({
                   styles.episodesCount
                 }
               >
-                {episodes.length} Ø­Ù„Ù‚Ø©
+                {episodes.length} حلقة
               </Text>
             </View>
 
@@ -1610,7 +1610,7 @@ function SeriesDetailsView({
                     styles.noEpisodesTitle
                   }
                 >
-                  Ù…Ø§ÙƒÙˆ Ø­Ù„Ù‚Ø§Øª Ù…ØªØ§Ø­Ø©
+                  ماكو حلقات متاحة
                 </Text>
 
                 <Text
@@ -1618,7 +1618,7 @@ function SeriesDetailsView({
                     styles.noEpisodesText
                   }
                 >
-                  Ù‡Ø°Ø§ Ø§Ù„Ù…ÙˆØ³Ù… Ù…Ø§ Ø±Ø¬Ø¹ Ø­Ù„Ù‚Ø§Øª Ù…Ù† Ø³ÙŠØ±ÙØ± Xtream.
+                  هذا الموسم ما رجع حلقات من سيرفر Xtream.
                 </Text>
               </View>
             ) : (
@@ -1674,7 +1674,7 @@ function SeriesDetailsView({
                                 styles.episodeImageFallbackText
                               }
                             >
-                              â–¶
+                              ▶
                             </Text>
                           </View>
                         )}
@@ -1718,10 +1718,10 @@ function SeriesDetailsView({
                             styles.episodeMeta
                           }
                         >
-                          Ø§Ù„Ù…ÙˆØ³Ù…{' '}
+                          الموسم{' '}
                           {episode.seasonNumber ||
                             selectedSeason}{' '}
-                          â€¢ Ø§Ù„Ø­Ù„Ù‚Ø©{' '}
+                          • الحلقة{' '}
                           {episode.episodeNumber ||
                             1}
                         </Text>
@@ -1737,7 +1737,7 @@ function SeriesDetailsView({
                             styles.episodePlayText
                           }
                         >
-                          â–¶
+                          ▶
                         </Text>
                       </View>
                     </Pressable>
@@ -1798,7 +1798,7 @@ function MovieDetailsView({
     setLoading(false);
 
     if (!xtreamInfo && !tmdbInfo) {
-      setError('ØªØ¹Ø°Ø± ØªØ­Ù…ÙŠÙ„ ØªÙØ§ØµÙŠÙ„ Ø§Ù„ÙÙŠÙ„Ù… Ù…Ù† Ø§Ù„Ù…ØµØ¯Ø± Ø§Ù„Ø­Ø§Ù„ÙŠ.');
+      setError('تعذر تحميل تفاصيل الفيلم من المصدر الحالي.');
     }
   }, [channel]);
 
@@ -1856,8 +1856,8 @@ function MovieDetailsView({
     <View style={styles.movieDetailsRoot}>
       <View style={styles.seriesTopBar}>
         <ControlButton
-          icon="â€¹"
-          label="Ø±Ø¬ÙˆØ¹"
+          icon="‹"
+          label="رجوع"
           onPress={onBack}
           preferred
           compact
@@ -1865,7 +1865,7 @@ function MovieDetailsView({
 
         <View style={styles.seriesTopTitle}>
           <Text numberOfLines={1} style={styles.seriesTopTitleText}>
-            ØªÙØ§ØµÙŠÙ„ Ø§Ù„ÙÙŠÙ„Ù…
+            تفاصيل الفيلم
           </Text>
         </View>
       </View>
@@ -1897,7 +1897,7 @@ function MovieDetailsView({
                 />
               ) : (
                 <View style={styles.seriesPosterFallback}>
-                  <Text style={styles.seriesPosterFallbackText}>Ø´</Text>
+                  <Text style={styles.seriesPosterFallbackText}>ش</Text>
                 </View>
               )}
             </View>
@@ -1915,7 +1915,7 @@ function MovieDetailsView({
                 ) : null}
 
                 {rating > 0 ? (
-                  <Text style={styles.seriesMetaText}>â˜… {rating.toFixed(1)}</Text>
+                  <Text style={styles.seriesMetaText}>★ {rating.toFixed(1)}</Text>
                 ) : null}
               </View>
 
@@ -1929,26 +1929,26 @@ function MovieDetailsView({
                 <Text style={styles.seriesPlotHero}>{plot}</Text>
               ) : (
                 <Text style={styles.seriesPlotHero}>
-                  Ù„Ø§ ØªÙˆØ¬Ø¯ Ù‚ØµØ© Ù…ØªÙˆÙØ±Ø© Ù…Ù† Ù…ØµØ¯Ø± Ø§Ù„Ø§Ø´ØªØ±Ø§Ùƒ Ø£Ùˆ TMDB.
+                  لا توجد قصة متوفرة من مصدر الاشتراك أو TMDB.
                 </Text>
               )}
 
               {info?.director ? (
                 <Text style={styles.movieDetailsSecondaryText}>
-                  Ø§Ù„Ù…Ø®Ø±Ø¬: {info.director}
+                  المخرج: {info.director}
                 </Text>
               ) : null}
 
               {info?.cast ? (
                 <Text style={styles.movieDetailsSecondaryText} numberOfLines={2}>
-                  Ø¨Ø·ÙˆÙ„Ø©: {info.cast}
+                  بطولة: {info.cast}
                 </Text>
               ) : null}
 
               <View style={styles.movieDetailsActions}>
                 <ControlButton
-                  icon="â–¶"
-                  label="Ù…Ø´Ø§Ù‡Ø¯Ø© Ø§Ù„Ø¢Ù†"
+                  icon="▶"
+                  label="مشاهدة الآن"
                   onPress={onWatch}
                   preferred
                 />
@@ -1961,14 +1961,14 @@ function MovieDetailsView({
           <View style={styles.seriesLoading}>
             <ActivityIndicator size="large" color={SHASHTNA_THEME.colors.primary} />
             <Text style={styles.seriesLoadingText}>
-              Ø¬Ø§Ø±ÙŠ ØªØ­Ù…ÙŠÙ„ ØªÙØ§ØµÙŠÙ„ Ø§Ù„ÙÙŠÙ„Ù…...
+              جاري تحميل تفاصيل الفيلم...
             </Text>
           </View>
         ) : error ? (
           <View style={styles.seriesErrorCard}>
-            <Text style={styles.seriesErrorTitle}>ØªØ¹Ø°Ø± ØªØ­Ù…ÙŠÙ„ Ø§Ù„ØªÙØ§ØµÙŠÙ„</Text>
+            <Text style={styles.seriesErrorTitle}>تعذر تحميل التفاصيل</Text>
             <Text style={styles.seriesErrorText}>{error}</Text>
-            <ControlButton icon="â†»" label="Ø¥Ø¹Ø§Ø¯Ø© Ø§Ù„Ù…Ø­Ø§ÙˆÙ„Ø©" onPress={loadDetails} />
+            <ControlButton icon="↻" label="إعادة المحاولة" onPress={loadDetails} />
           </View>
         ) : null}
       </ScrollView>
@@ -2818,7 +2818,7 @@ export default function PlayerScreen({
         data: VideoErrorEvent,
       ) => {
         let message =
-          'ØªØ¹Ø°Ø± ØªØ´ØºÙŠÙ„ Ù‡Ø°Ø§ Ø§Ù„Ù…Ø­ØªÙˆÙ‰.';
+          'تعذر تشغيل هذا المحتوى.';
 
         if (
           data?.error
@@ -2835,7 +2835,7 @@ export default function PlayerScreen({
                 0
             ) {
               message =
-                `ØªØ¹Ø°Ø± ØªØ´ØºÙŠÙ„ Ø§Ù„Ù…Ø­ØªÙˆÙ‰.\n${raw}`;
+                `تعذر تشغيل المحتوى.\n${raw}`;
             }
           } catch {
             // Keep default message.
@@ -3052,7 +3052,7 @@ export default function PlayerScreen({
                   styles.spinnerText
                 }
               >
-                â—Œ
+                ◌
               </Text>
             </View>
 
@@ -3061,7 +3061,7 @@ export default function PlayerScreen({
                 styles.bufferingText
               }
             >
-              Ø¬Ø§Ø±ÙŠ ØªØ­Ù…ÙŠÙ„ Ø§Ù„Ø¨Ø«...
+              جاري تحميل البث...
             </Text>
           </View>
         )}
@@ -3078,7 +3078,7 @@ export default function PlayerScreen({
             style={
               styles.hiddenControlsTapZone
             }
-            accessibilityLabel="Ø¥Ø¸Ù‡Ø§Ø± Ø¹Ù†Ø§ØµØ± Ø§Ù„ØªØ­ÙƒÙ…"
+            accessibilityLabel="إظهار عناصر التحكم"
           />
         )}
 
@@ -3096,8 +3096,8 @@ export default function PlayerScreen({
                 style={[styles.topBar,{flexDirection: ar ? 'row-reverse' : 'row'}]}
               >
                 <ControlButton
-                  icon={ar ? 'â€º' : 'â€¹'}
-                  label="Ø±Ø¬ÙˆØ¹"
+                  icon={ar ? '›' : '‹'}
+                  label="رجوع"
                   onPress={
                     goBack
                   }
@@ -3249,13 +3249,13 @@ export default function PlayerScreen({
                   <ControlButton
                     icon={
                       paused
-                        ? 'â–¶'
-                        : 'âšâš'
+                        ? '▶'
+                        : '❚❚'
                     }
                     label={
                       paused
-                        ? 'ØªØ´ØºÙŠÙ„'
-                        : 'Ø¥ÙŠÙ‚Ø§Ù'
+                        ? 'تشغيل'
+                        : 'إيقاف'
                     }
                     onPress={
                       togglePlay
@@ -3263,7 +3263,7 @@ export default function PlayerScreen({
                   />
 
                   <ControlButton
-                    icon="â†¶"
+                    icon="↶"
                     label="-10"
                     onPress={() =>
                       seekBy(
@@ -3276,7 +3276,7 @@ export default function PlayerScreen({
                   />
 
                   <ControlButton
-                    icon="â†·"
+                    icon="↷"
                     label="+10"
                     onPress={() =>
                       seekBy(
@@ -3290,7 +3290,7 @@ export default function PlayerScreen({
 
                   <ControlButton
                     icon="A"
-                    label="Ø§Ù„ØµÙˆØª"
+                    label="الصوت"
                     onPress={() => {
                       setMenu(
                         'audio',
@@ -3306,7 +3306,7 @@ export default function PlayerScreen({
 
                   <ControlButton
                     icon="CC"
-                    label="Ø§Ù„ØªØ±Ø¬Ù…Ø©"
+                    label="الترجمة"
                     onPress={() => {
                       setMenu(
                         'subtitle',
@@ -3322,7 +3322,7 @@ export default function PlayerScreen({
 
                   <ControlButton
                     icon="HD"
-                    label="Ø§Ù„Ø¬ÙˆØ¯Ø©"
+                    label="الجودة"
                     onPress={() => {
                       setMenu(
                         'quality',
@@ -3339,8 +3339,8 @@ export default function PlayerScreen({
                   />
 
                   <ControlButton
-                    icon="â›¶"
-                    label="Ù…Ù„Ø¡ Ø§Ù„Ø´Ø§Ø´Ø©"
+                    icon="⛶"
+                    label="ملء الشاشة"
                     onPress={
                       wakeControls
                     }
@@ -3348,8 +3348,8 @@ export default function PlayerScreen({
                   />
 
                   <ControlButton
-                    icon="Ã—"
-                    label="Ø®Ø±ÙˆØ¬"
+                    icon="×"
+                    label="خروج"
                     onPress={
                       goBack
                     }
@@ -3379,7 +3379,7 @@ export default function PlayerScreen({
                   styles.loadingLogoText
                 }
               >
-                Ø´
+                ش
               </Text>
             </View>
 
@@ -3388,7 +3388,7 @@ export default function PlayerScreen({
                 styles.loadingTitle
               }
             >
-              Ø¬Ø§Ø±ÙŠ ÙØªØ­ Ø§Ù„Ù…Ø­ØªÙˆÙ‰
+              جاري فتح المحتوى
             </Text>
 
             <Text
@@ -3396,7 +3396,7 @@ export default function PlayerScreen({
                 styles.loadingSubtitle
               }
             >
-              ÙŠØ±Ø¬Ù‰ Ø§Ù„Ø§Ù†ØªØ¸Ø§Ø±...
+              يرجى الانتظار...
             </Text>
           </View>
         )}
@@ -3431,7 +3431,7 @@ export default function PlayerScreen({
                 styles.messageTitle
               }
             >
-              Ø­Ø¯Ø«Øª Ù…Ø´ÙƒÙ„Ø© ÙÙŠ Ø§Ù„ØªØ´ØºÙŠÙ„
+              حدثت مشكلة في التشغيل
             </Text>
 
             <Text
@@ -3448,8 +3448,8 @@ export default function PlayerScreen({
               }
             >
               <ControlButton
-                icon="â†»"
-                label="Ø¥Ø¹Ø§Ø¯Ø© Ø§Ù„Ù…Ø­Ø§ÙˆÙ„Ø©"
+                icon="↻"
+                label="إعادة المحاولة"
                 onPress={
                   retry
                 }
@@ -3457,8 +3457,8 @@ export default function PlayerScreen({
               />
 
               <ControlButton
-                icon="â€¹"
-                label="Ø±Ø¬ÙˆØ¹"
+                icon="‹"
+                label="رجوع"
                 onPress={
                   goBack
                 }
@@ -3490,7 +3490,7 @@ export default function PlayerScreen({
                     styles.messageIconText
                   }
                 >
-                  âœ“
+                  ✓
                 </Text>
               </View>
 
@@ -3499,7 +3499,7 @@ export default function PlayerScreen({
                   styles.messageTitle
                 }
               >
-                Ø§Ù†ØªÙ‡Ù‰ Ø§Ù„Ù…Ø­ØªÙˆÙ‰
+                انتهى المحتوى
               </Text>
 
               <Text
@@ -3507,7 +3507,7 @@ export default function PlayerScreen({
                   styles.messageDescription
                 }
               >
-                ÙŠÙ…ÙƒÙ†Ùƒ Ø¥Ø¹Ø§Ø¯Ø© ØªØ´ØºÙŠÙ„Ù‡ Ù…Ù† Ø§Ù„Ø¨Ø¯Ø§ÙŠØ© Ø£Ùˆ Ø§Ù„Ø±Ø¬ÙˆØ¹ Ù„Ù„Ù…ÙƒØªØ¨Ø©.
+                يمكنك إعادة تشغيله من البداية أو الرجوع للمكتبة.
               </Text>
 
               <View
@@ -3516,8 +3516,8 @@ export default function PlayerScreen({
                 }
               >
                 <ControlButton
-                  icon="â†»"
-                  label="Ø¥Ø¹Ø§Ø¯Ø© Ø§Ù„ØªØ´ØºÙŠÙ„"
+                  icon="↻"
+                  label="إعادة التشغيل"
                   onPress={
                     replay
                   }
@@ -3525,8 +3525,8 @@ export default function PlayerScreen({
                 />
 
                 <ControlButton
-                  icon="â€¹"
-                  label="Ø±Ø¬ÙˆØ¹"
+                  icon="‹"
+                  label="رجوع"
                   onPress={
                     goBack
                   }

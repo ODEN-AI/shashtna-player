@@ -12,6 +12,7 @@ import { getRecentTmdbCatalog, tmdbImageUrl, TmdbMediaMetadata, TmdbRecentItem }
 import { SHASHTNA_FONT, SHASHTNA_THEME } from '../../design/theme';
 import AppIcon, { AppIconName } from '../../components/common/AppIcon';
 import { useAppPreferences } from '../../design/AppPreferencesContext';
+import { focusStyle, Palette, usePalette } from '../../design/palette';
 
 type Props = {
   channels: M3UChannel[];
@@ -179,68 +180,6 @@ function discoveryMatchesSource(
   return matched;
 }
 
-function Icon({name, active=false, size=20}:{name:'home'|'live'|'movie'|'series'|'fav'|'settings'|'search'|'play'|'plus'|'chevron'|'favorite'|'arrow';active?:boolean;size?:number}) {
-  const map: Record<typeof name, AppIconName> = {
-    home:'home', live:'live', movie:'movies', series:'series', fav:'favorites', settings:'settings',
-    search:'search', play:'play', plus:'plus', chevron:'chevron', favorite:'favorite', arrow:'arrow',
-  };
-  return <AppIcon name={map[name]} active={active} size={size}/>;
-}
-
-function Poster({
-  item,
-  metadata,
-  favorite,
-  onToggleFavorite,
-  compact=false,
-  palette,
-}: {
-  item:MediaItem;
-  metadata?:TmdbMediaMetadata;
-  favorite:boolean;
-  onToggleFavorite?:()=>void;
-  compact?:boolean;
-  palette:Palette;
-}) {
-  const poster = tmdbImageUrl(metadata?.posterPath,'w500') || item.channel.logo || '';
-
-  const width = compact ? SHASHTNA_THEME.layout.compactW : SHASHTNA_THEME.layout.posterW;
-  const height = compact ? SHASHTNA_THEME.layout.compactH : SHASHTNA_THEME.layout.posterH;
-
-  return (
-    <View style={[styles.posterWrap,{width}]}> 
-      <View style={[styles.poster,{width,height,borderColor:palette.border}]}> 
-        {poster ? <Image source={{uri:poster}} style={styles.posterImage}/> : <View style={styles.posterFallback}><Icon name={item.type==='movie'?'movie':'series'} size={28}/></View>}
-        {onToggleFavorite ? (
-          <Pressable
-            focusable
-            onPress={onToggleFavorite}
-            accessibilityRole="button"
-            accessibilityLabel={favorite ? 'Remove from favorites' : 'Add to favorites'}
-            style={({focused,pressed})=>[
-              styles.favoriteButton,
-              favorite && styles.favoriteButtonActive,
-              focused && styles.favoriteButtonFocused,
-              pressed && styles.favoriteButtonPressed,
-            ]}
-          >
-            <Icon name="favorite" size={14} />
-          </Pressable>
-        ) : null}
-      </View>
-      <Text numberOfLines={2} style={[styles.posterTitle,{color:palette.text}]}>{cleanTitle(item.channel.name)}</Text>
-    </View>
-  );
-}
-
-function MediaChip({item,metadata,onPress,favorite,onToggleFavorite,palette}:{item:MediaItem;metadata?:TmdbMediaMetadata;onPress:()=>void;favorite:boolean;onToggleFavorite?:()=>void;palette:Palette}) {
-  return (
-    <Pressable focusable onPress={onPress} style={({focused,pressed})=>[styles.mediaCard,focused&&styles.focused,pressed&&styles.pressed]}>
-      <Poster item={item} metadata={metadata} compact favorite={favorite} onToggleFavorite={onToggleFavorite} palette={palette}/>
-    </Pressable>
-  );
-}
-
 export default function HomeScreen({
   channels,
   channelCount,
@@ -251,10 +190,9 @@ export default function HomeScreen({
   favoriteIds = [],
   onToggleFavorite,
 }:Props) {
-  const { language, themeMode } = useAppPreferences();
+  const { language } = useAppPreferences();
   const ar = language === 'ar';
-  const light = themeMode === 'light';
-  const palette = light ? lightColors : darkColors;
+  const palette = usePalette();
   const favoriteSet = useMemo(()=>new Set(favoriteIds),[favoriteIds]);
 
   const [foreignMovies, setForeignMovies] = useState<MediaItem[]>([]);
@@ -438,204 +376,471 @@ export default function HomeScreen({
         ? tmdbImageUrl(hero.meta.posterPath, 'w780') || ''
         : hero?.channel.logo || '';
 
-  const isFav = (item:MediaItem) => favoriteSet.has(`${item.type}:${String(item.channel.id)}`);
-  const toggle = (item:MediaItem) => onToggleFavorite?.(item.channel);
+  const isFav = (item: MediaItem) => favoriteSet.has(`${item.type}:${String(item.channel.id)}`);
+  const toggle = (item: MediaItem) => onToggleFavorite?.(item.channel);
+  const locale = ar ? 'ar-IQ' : 'en-US';
+  const dir = ar ? 'rtl' : 'ltr';
+  const textAlign = ar ? 'right' : 'left';
+  const rowDirection = ar ? 'row-reverse' : 'row';
 
-  const countText = (n:number, labelAr:string, labelEn:string) => `${n.toLocaleString(ar?'ar-IQ':'en-US')} ${ar?labelAr:labelEn}`;
+  const heroDots = Math.min(heroPool.length, 6);
+  const heroIndex = heroPool.length ? rotation % heroPool.length : 0;
+  const heroRating = Number(hero?.meta?.voteAverage || 0);
+  const heroYear = hero?.meta?.releaseDate ? hero.meta.releaseDate.slice(0, 4) : '';
 
-  const nav = [
-    ['home', ar ? 'Ø§Ù„Ø±Ø¦ÙŠØ³ÙŠØ©' : 'Home', 'home'],
-    ['live', ar ? 'Ø¨Ø« Ù…Ø¨Ø§Ø´Ø±' : 'Live TV', 'live'],
-    ['movies', ar ? 'Ø£ÙÙ„Ø§Ù…' : 'Movies', 'movie'],
-    ['series', ar ? 'Ù…Ø³Ù„Ø³Ù„Ø§Øª' : 'Series', 'series'],
-    ['favorites', ar ? 'Ø§Ù„Ù…ÙØ¶Ù„Ø©' : 'Favorites', 'fav'],
-    ['search', ar ? 'Ø¨Ø­Ø«' : 'Search', 'search'],
-    ['settings', ar ? 'Ø§Ù„Ø¥Ø¹Ø¯Ø§Ø¯Ø§Øª' : 'Settings', 'settings'],
-  ] as const;
   return (
-    <View style={[styles.screen,{backgroundColor:palette.background}]}> 
-      <View style={styles.topGlow}/>
-      <View style={[styles.header,{flexDirection: ar ? 'row-reverse' : 'row'}]}>
-        <View style={styles.brandSpacer}>
-          <View style={styles.brandMark}><Text style={styles.brandMarkText}>Ø´</Text></View>
-          <View>
-            <Text style={[styles.brandArabic,{color:palette.text}, ar && styles.rtlText]}>{'Ø¹Ø¨Ø¯Ø§Ù„Ø±Ø­Ù…Ù† IPTV'}</Text>
-            <Text style={[styles.brandLatin,{color:light?'#1675D1':SHASHTNA_THEME.colors.primaryBright}]}>PLAYER</Text>
-          </View>
-        </View>
-        <View style={styles.headerRight}>
-          <Pressable focusable onPress={()=>onNavigate('movies')} style={({focused,pressed})=>[styles.search,focused&&styles.focused,pressed&&styles.pressed,{backgroundColor:palette.surface,borderColor:palette.border}]}> 
-            <Icon name="search" size={18}/>
-            <Text style={[styles.searchText,{color:palette.muted}, ar && styles.rtlText]}>{ar?'\u0627\u0628\u062d\u062b \u0639\u0646 \u0641\u064a\u0644\u0645 \u0623\u0648 \u0645\u0633\u0644\u0633\u0644...':'Search movies or series...'}</Text>
-          </Pressable>
-          <View style={styles.headerMeta}>
-            <Text style={[styles.headerMetaTitle,{color:palette.text}, ar && styles.rtlText]}>{ar?'\u0623\u062d\u062f\u062b \u0627\u0644\u0645\u062d\u062a\u0648\u0649 \u0627\u0644\u0645\u062a\u0627\u062d':'Latest available content'}</Text>
-            <Text style={[styles.headerMetaSub,{color:palette.muted}, ar && styles.rtlText]}>{ar?'\u064a\u062a\u062c\u062f\u062f \u062a\u0644\u0642\u0627\u0626\u064a\u0627\u064b':'Refreshes automatically'}</Text>
-          </View>
-        </View>
-      </View>
+    <View style={[styles.screen, { backgroundColor: palette.background }]}>
+      <ScrollView
+        style={[styles.content, { direction: dir }]}
+        contentContainerStyle={styles.contentContainer}
+        showsVerticalScrollIndicator={false}
+        removeClippedSubviews
+      >
+        {/* ================= HERO ================= */}
+        <View style={[styles.hero, { backgroundColor: palette.surface, borderColor: palette.border }]}>
+          {heroPoster ? (
+            <Image source={{ uri: heroPoster }} style={styles.heroImage} resizeMode="cover" />
+          ) : (
+            <View style={[styles.heroImage, styles.heroPlaceholder]} />
+          )}
+          <View style={[styles.fill, { experimental_backgroundImage: ar ? palette.heroFadeRtl : palette.heroFade }]} />
+          <View style={[styles.fill, { experimental_backgroundImage: palette.heroBottom }]} />
 
-      <View style={styles.body}>
-        <View style={[styles.sidebar,{backgroundColor:palette.sidebar,borderColor:palette.border, display:'none'}]}> 
-          <Text style={[styles.sidebarCaption,{color:palette.muted}, ar && styles.rtlText]}>{ar?'\u0627\u0644\u0642\u0627\u0626\u0645\u0629 \u0627\u0644\u0631\u0626\u064a\u0633\u064a\u0629':'MAIN MENU'}</Text>
-          {nav.map(([id,label,icon])=>(
-            <Pressable key={id} focusable accessibilityRole="button" accessibilityLabel={label} hasTVPreferredFocus={id==='home'} onPress={()=>onNavigate(id as any)} style={({focused,pressed})=>[
-              styles.navItem,
-              id==='home' && {backgroundColor:palette.active,borderColor:palette.activeBorder},
-              focused && styles.focused,
-              pressed && styles.pressed,
-            ]}>
-              <View style={[styles.navIconBox,id==='home'&&{backgroundColor:light?'#D9EEFF':SHASHTNA_THEME.colors.primaryMedium}]}>
-                <Icon name={icon as any} active={id==='home'} size={19}/>
+          <View style={[styles.heroCopy, ar ? styles.heroCopyRtl : styles.heroCopyLtr]}>
+            <View style={[styles.heroBadgeRow, { flexDirection: rowDirection }]}>
+              <View style={styles.heroBadge}>
+                <Text style={styles.heroBadgeText}>{ar ? 'جديد' : 'NEW'}</Text>
               </View>
-              <Text style={[styles.navText,{color:id==='home'?palette.text:palette.secondary},id==='home'&&styles.navTextActive, ar && styles.rtlText]}>{label}</Text>
-              {id==='home' ? <View style={styles.navActiveLine}/> : null}
-            </Pressable>
-          ))}
-        </View>
-
-        <ScrollView style={[styles.content,{direction: ar ? 'rtl' : 'ltr'}]} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false} removeClippedSubviews>
-          <View style={[styles.hero,{backgroundColor:palette.surface,borderColor:palette.borderStrong}]}> 
-            <View style={[styles.heroScrimSide, ar && styles.heroScrimSideRtl]} />
-            <View style={styles.heroScrimBottom} />
-            <View style={[styles.heroCopy, ar && styles.heroCopyRtl]}>
-              <Text numberOfLines={2} style={[styles.heroTitle,{color:palette.text, writingDirection: ar ? 'rtl' : 'ltr', textAlign: ar ? 'right' : 'left'}]}>{hero?hero.title:(ar?'\u0623\u062d\u062f\u062b \u0627\u0644\u0645\u062d\u062a\u0648\u0649 \u064a\u0638\u0647\u0631 \u0647\u0646\u0627':'Latest content appears here')}</Text>
-              <View style={[styles.heroMetaRow, ar && styles.rtlRow]}>
-                {hero?.meta?.voteAverage ? (
-                  <Text style={[styles.heroMetaText,{color:palette.secondary}]}>
-                    â˜… {Number(hero.meta.voteAverage).toFixed(1)}
-                  </Text>
-                ) : null}
-                {hero?.meta?.releaseDate ? (
-                  <Text style={[styles.heroMetaText,{color:palette.secondary}]}>
-                    {hero.meta.releaseDate.slice(0, 4)}
-                  </Text>
-                ) : null}
-                {hero ? (
-                  <Text style={[styles.heroMetaText,{color:palette.secondary}]}>
-                    {hero.type === 'movie' ? (ar ? '\u0641\u064a\u0644\u0645' : 'Movie') : (ar ? '\u0645\u0633\u0644\u0633\u0644' : 'Series')}
-                  </Text>
-                ) : null}
-              </View>
-              <Text numberOfLines={3} style={[styles.heroDesc,{color:palette.secondary, writingDirection: ar ? 'rtl' : 'ltr', textAlign: ar ? 'right' : 'left'}]}>{hero?.meta?.overview || (ar?'\u0646\u0639\u0631\u0636 \u0644\u0643 \u0623\u062d\u062f\u062b \u0627\u0644\u0623\u0641\u0644\u0627\u0645 \u0648\u0627\u0644\u0645\u0633\u0644\u0633\u0644\u0627\u062a \u0627\u0644\u0623\u062c\u0646\u0628\u064a\u0629 \u0627\u0644\u0645\u062a\u0648\u0641\u0631\u0629 \u0641\u064a \u0627\u0644\u0645\u0635\u062f\u0631 \u0627\u0644\u0645\u062a\u0635\u0644\u060c \u0645\u0639 \u062a\u0628\u062f\u064a\u0644 \u0627\u0644\u0627\u0642\u062a\u0631\u0627\u062d\u0627\u062a \u062a\u0644\u0642\u0627\u0626\u064a\u0627\u064b.':'Showing recent foreign movies and series available in the connected source, with rotating recommendations.')}</Text>
-              <View style={[styles.actions, ar && styles.rtlRow]}>
-                {hero ? <Pressable focusable onPress={()=>onOpenPlayer(hero.channel)} style={({focused,pressed})=>[styles.primaryButton,focused&&styles.focused,pressed&&styles.pressed]}><Icon name="play" active size={18}/><Text style={[styles.primaryButtonText, ar && styles.rtlButtonText]}>{ar?'\u0645\u0634\u0627\u0647\u062f\u0629 \u0627\u0644\u0622\u0646':'Watch now'}</Text></Pressable> : null}
-                {hero ? <Pressable focusable onPress={()=>toggle(hero)} style={({focused,pressed})=>[styles.secondaryButton,focused&&styles.focused,pressed&&styles.pressed,{backgroundColor:palette.surfaceElevated,borderColor:palette.border}]}> <Icon name="favorite" size={17}/><Text style={[styles.secondaryButtonText,{color:palette.text}, ar && styles.rtlButtonText]}>{isFav(hero)?(ar?'\u0625\u0632\u0627\u0644\u0629 \u0645\u0646 \u0642\u0627\u0626\u0645\u062a\u064a':'Remove from list'):(ar?'\u0625\u0636\u0627\u0641\u0629 \u0644\u0642\u0627\u0626\u0645\u062a\u064a':'Add to list')}</Text></Pressable> : null}
-              </View>
+              {hero ? (
+                <Text style={[styles.heroKind, { color: palette.secondary }]}>
+                  {hero.type === 'movie' ? (ar ? 'فيلم' : 'Movie') : (ar ? 'مسلسل' : 'Series')}
+                </Text>
+              ) : null}
             </View>
+
+            <Text numberOfLines={2} style={[styles.heroTitle, { color: palette.text, writingDirection: dir, textAlign }]}>
+              {hero ? hero.title : ar ? 'أحدث المحتوى يظهر هنا' : 'Latest content appears here'}
+            </Text>
+
+            {hero && (heroRating || heroYear) ? (
+              <View style={[styles.heroMetaRow, { flexDirection: rowDirection }]}>
+                {heroRating ? (
+                  <View style={[styles.metaPill, { flexDirection: rowDirection }]}>
+                    <AppIcon name="star" size={13} color={SHASHTNA_THEME.colors.rating} />
+                    <Text style={styles.metaPillText}>{heroRating.toFixed(1)}</Text>
+                  </View>
+                ) : null}
+                {heroYear ? (
+                  <View style={styles.metaPill}>
+                    <Text style={styles.metaPillText}>{heroYear}</Text>
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
+
+            <Text numberOfLines={2} style={[styles.heroDesc, { color: palette.secondary, writingDirection: dir, textAlign }]}>
+              {hero?.meta?.overview ||
+                (ar
+                  ? 'نعرض لك أحدث الأفلام والمسلسلات الأجنبية المتوفرة في المصدر المتصل، مع تبديل الاقتراحات تلقائياً.'
+                  : 'Showing recent foreign movies and series available in the connected source, with rotating recommendations.')}
+            </Text>
+
+            {hero ? (
+              <View style={[styles.actions, { flexDirection: rowDirection }]}>
+                <Pressable
+                  focusable
+                  onPress={() => onOpenPlayer(hero.channel)}
+                  style={({ focused, pressed }) => [
+                    styles.primaryButton,
+                    { flexDirection: rowDirection },
+                    focused && focusStyle(palette, SHASHTNA_THEME.focus.buttonScale),
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <AppIcon name="play" size={18} color="#FFFFFF" />
+                  <Text style={styles.primaryButtonText}>{ar ? 'مشاهدة الآن' : 'Watch now'}</Text>
+                </Pressable>
+                <Pressable
+                  focusable
+                  onPress={() => toggle(hero)}
+                  style={({ focused, pressed }) => [
+                    styles.secondaryButton,
+                    { flexDirection: rowDirection, backgroundColor: palette.overlay, borderColor: palette.borderStrong },
+                    focused && focusStyle(palette, SHASHTNA_THEME.focus.buttonScale),
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <AppIcon
+                    name={isFav(hero) ? 'check' : 'plus'}
+                    size={18}
+                    color={palette.mode === 'dark' ? '#FFFFFF' : palette.text}
+                  />
+                  <Text style={[styles.secondaryButtonText, { color: palette.mode === 'dark' ? '#FFFFFF' : palette.text }]}>
+                    {isFav(hero) ? (ar ? 'في قائمتي' : 'In my list') : ar ? 'أضف لقائمتي' : 'My list'}
+                  </Text>
+                </Pressable>
+              </View>
+            ) : null}
           </View>
 
-          <SectionHeader title={ar?'\u0623\u062d\u062f\u062b \u0627\u0644\u0623\u0641\u0644\u0627\u0645 \u0627\u0644\u0623\u062c\u0646\u0628\u064a\u0629':'Latest foreign movies'} action={ar?'\u0639\u0631\u0636 \u0627\u0644\u0643\u0644':'View all'} onPress={()=>onNavigate('movies')} palette={palette}/>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.row,{flexDirection: ar ? 'row-reverse' : 'row'}]}>
-            {displayMovies.map(item=><MediaChip key={`${item.type}:${item.channel.id}`} item={item} metadata={item.meta} favorite={isFav(item)} onToggleFavorite={onToggleFavorite?()=>toggle(item):undefined} onPress={()=>onOpenPlayer(item.channel)} palette={palette}/>) }
-          </ScrollView>
+          {heroDots > 1 ? (
+            <View style={[styles.heroDots, ar ? styles.heroDotsRtl : styles.heroDotsLtr, { flexDirection: rowDirection }]}>
+              {Array.from({ length: heroDots }).map((_, i) => (
+                <View key={i} style={[styles.heroDot, i === heroIndex % heroDots && styles.heroDotActive]} />
+              ))}
+            </View>
+          ) : null}
+        </View>
 
-          <SectionHeader title={ar?'\u0623\u062d\u062f\u062b \u0627\u0644\u0645\u0633\u0644\u0633\u0644\u0627\u062a \u0627\u0644\u0623\u062c\u0646\u0628\u064a\u0629':'Latest foreign series'} action={ar?'\u0639\u0631\u0636 \u0627\u0644\u0643\u0644':'View all'} onPress={()=>onNavigate('series')} palette={palette}/>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.row,{flexDirection: ar ? 'row-reverse' : 'row'}]}>
-            {displaySeries.map(item=><MediaChip key={`${item.type}:${item.channel.id}`} item={item} metadata={item.meta} favorite={isFav(item)} onToggleFavorite={onToggleFavorite?()=>toggle(item):undefined} onPress={()=>onOpenPlayer(item.channel)} palette={palette}/>) }
-          </ScrollView>
+        {/* ================= QUICK ACCESS ================= */}
+        <View style={[styles.quickRow, { flexDirection: rowDirection }]}>
+          <QuickCard
+            icon="live"
+            accent={SHASHTNA_THEME.gradients.live}
+            title={ar ? 'البث المباشر' : 'Live TV'}
+            sub={`${channelCount.toLocaleString(locale)} ${ar ? 'قناة' : 'channels'}`}
+            onPress={() => onNavigate('live')}
+            palette={palette}
+            ar={ar}
+          />
+          <QuickCard
+            icon="movies"
+            accent={SHASHTNA_THEME.gradients.brand}
+            title={ar ? 'الأفلام' : 'Movies'}
+            sub={`${movieCount.toLocaleString(locale)} ${ar ? 'عنوان' : 'titles'}`}
+            onPress={() => onNavigate('movies')}
+            palette={palette}
+            ar={ar}
+          />
+          <QuickCard
+            icon="series"
+            accent="linear-gradient(120deg, #7B4DFF 0%, #B26BFF 100%)"
+            title={ar ? 'المسلسلات' : 'Series'}
+            sub={`${seriesCount.toLocaleString(locale)} ${ar ? 'مسلسل' : 'series'}`}
+            onPress={() => onNavigate('series')}
+            palette={palette}
+            ar={ar}
+          />
+          <QuickCard
+            icon="favorite"
+            accent="linear-gradient(120deg, #FF4D7A 0%, #FF8A5B 100%)"
+            title={ar ? 'المفضلة' : 'Favorites'}
+            sub={`${favoriteIds.length.toLocaleString(locale)} ${ar ? 'محفوظ' : 'saved'}`}
+            onPress={() => onNavigate('favorites')}
+            palette={palette}
+            ar={ar}
+          />
+        </View>
 
-          <SectionHeader title={ar?'\u0648\u0635\u0644 \u062d\u062f\u064a\u062b\u064b\u0627':'Recently added'} action={ar?'\u062a\u062d\u062f\u064a\u062b \u0627\u0644\u0639\u0631\u0636':'Refresh view'} onPress={()=>setRotation(value => value + 1)} palette={palette}/>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.row,{flexDirection: ar ? 'row-reverse' : 'row'}]}>
-            {recentMixed.map(item=><MediaChip key={`recent:${item.type}:${item.channel.id}`} item={item} metadata={item.meta} favorite={isFav(item)} onToggleFavorite={onToggleFavorite?()=>toggle(item):undefined} onPress={()=>onOpenPlayer(item.channel)} palette={palette}/>)}
-          </ScrollView>
-
-          <View style={styles.categoryRow}>
-            <QuickCard icon="live" title={ar?'\u0628\u062b \u0645\u0628\u0627\u0634\u0631':'Live TV'} sub={countText(channelCount,'\u0642\u0646\u0627\u0629','channels')} onPress={()=>onNavigate('live')} palette={palette}/>
-            <QuickCard icon="movie" title={ar?'\u0623\u0641\u0644\u0627\u0645':'Movies'} sub={countText(movieCount,'\u0639\u0646\u0648\u0627\u0646','titles')} onPress={()=>onNavigate('movies')} palette={palette}/>
-            <QuickCard icon="series" title={ar?'\u0645\u0633\u0644\u0633\u0644\u0627\u062a':'Series'} sub={countText(seriesCount,'\u0645\u0633\u0644\u0633\u0644','series')} onPress={()=>onNavigate('series')} palette={palette}/>
-            <QuickCard icon="fav" title={ar?'\u0627\u0644\u0645\u0641\u0636\u0644\u0629':'Favorites'} sub={ar?'\u0645\u062d\u062a\u0648\u0627\u0643 \u0627\u0644\u0645\u062d\u0641\u0648\u0638':'Saved titles'} onPress={()=>onNavigate('favorites')} palette={palette}/>
-          </View>
-        </ScrollView>
-      </View>
+        {/* ================= ROWS ================= */}
+        <MediaRow
+          title={ar ? 'أحدث الأفلام الأجنبية' : 'Latest foreign movies'}
+          action={ar ? 'عرض الكل' : 'View all'}
+          onAction={() => onNavigate('movies')}
+          items={displayMovies}
+          keyPrefix="movies"
+          palette={palette}
+          ar={ar}
+          isFav={isFav}
+          onToggle={onToggleFavorite ? toggle : undefined}
+          onOpen={item => onOpenPlayer(item.channel)}
+        />
+        <MediaRow
+          title={ar ? 'أحدث المسلسلات الأجنبية' : 'Latest foreign series'}
+          action={ar ? 'عرض الكل' : 'View all'}
+          onAction={() => onNavigate('series')}
+          items={displaySeries}
+          keyPrefix="series"
+          palette={palette}
+          ar={ar}
+          isFav={isFav}
+          onToggle={onToggleFavorite ? toggle : undefined}
+          onOpen={item => onOpenPlayer(item.channel)}
+        />
+        <MediaRow
+          title={ar ? 'وصل حديثاً' : 'Recently added'}
+          action={ar ? 'تحديث العرض' : 'Refresh'}
+          actionIcon="refresh"
+          onAction={() => setRotation(value => value + 1)}
+          items={recentMixed}
+          keyPrefix="recent"
+          palette={palette}
+          ar={ar}
+          isFav={isFav}
+          onToggle={onToggleFavorite ? toggle : undefined}
+          onOpen={item => onOpenPlayer(item.channel)}
+        />
+      </ScrollView>
     </View>
   );
 }
 
-function SectionHeader({title,action,onPress,palette}:{title:string;action:string;onPress:()=>void;palette:Palette}) {
-  return <View style={styles.sectionHeader}>
-    <Text style={[styles.sectionTitle,{color:palette.text}]}>{title}</Text>
-    <Pressable focusable onPress={onPress} style={({focused,pressed})=>[styles.viewAll,focused&&styles.focused,pressed&&styles.pressed]}>
-      <Text style={[styles.viewAllText,{color:palette.secondary}]}>{action}</Text><Icon name="arrow" size={13}/>
+/* =========================================================
+   BUILDING BLOCKS
+   ========================================================= */
+
+function MediaRow({
+  title,
+  action,
+  actionIcon = 'chevron',
+  onAction,
+  items,
+  keyPrefix,
+  palette,
+  ar,
+  isFav,
+  onToggle,
+  onOpen,
+}: {
+  title: string;
+  action: string;
+  actionIcon?: AppIconName;
+  onAction: () => void;
+  items: RankedItem[];
+  keyPrefix: string;
+  palette: Palette;
+  ar: boolean;
+  isFav: (item: MediaItem) => boolean;
+  onToggle?: (item: MediaItem) => void;
+  onOpen: (item: MediaItem) => void;
+}) {
+  if (!items.length) return null;
+
+  return (
+    <View style={styles.section}>
+      <View style={[styles.sectionHeader, { flexDirection: ar ? 'row-reverse' : 'row' }]}>
+        <View style={[styles.sectionTitleWrap, { flexDirection: ar ? 'row-reverse' : 'row' }]}>
+          <View style={styles.sectionAccent} />
+          <Text style={[styles.sectionTitle, { color: palette.text }]}>{title}</Text>
+        </View>
+        <Pressable
+          focusable
+          onPress={onAction}
+          style={({ focused, pressed }) => [
+            styles.viewAll,
+            { flexDirection: ar ? 'row-reverse' : 'row' },
+            focused && focusStyle(palette, SHASHTNA_THEME.focus.buttonScale),
+            pressed && styles.pressed,
+          ]}
+        >
+          <Text style={[styles.viewAllText, { color: palette.primaryText }]}>{action}</Text>
+          <View style={ar && actionIcon === 'chevron' ? styles.flipX : undefined}>
+            <AppIcon name={actionIcon} size={14} color={palette.primaryText} />
+          </View>
+        </Pressable>
+      </View>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={[styles.row, { flexDirection: ar ? 'row-reverse' : 'row' }]}
+      >
+        {items.map(item => (
+          <PosterCard
+            key={`${keyPrefix}:${item.type}:${item.channel.id}`}
+            item={item}
+            favorite={isFav(item)}
+            onPress={() => onOpen(item)}
+            onToggleFavorite={onToggle ? () => onToggle(item) : undefined}
+            palette={palette}
+            ar={ar}
+          />
+        ))}
+      </ScrollView>
+    </View>
+  );
+}
+
+function PosterCard({
+  item,
+  favorite,
+  onPress,
+  onToggleFavorite,
+  palette,
+  ar,
+}: {
+  item: RankedItem;
+  favorite: boolean;
+  onPress: () => void;
+  onToggleFavorite?: () => void;
+  palette: Palette;
+  ar: boolean;
+}) {
+  const [failed, setFailed] = useState(false);
+  const poster = tmdbImageUrl(item.meta?.posterPath, 'w342') || item.channel.logo || '';
+  const rating = Number(item.meta?.voteAverage || 0);
+  const year = item.meta?.releaseDate ? item.meta.releaseDate.slice(0, 4) : '';
+
+  return (
+    <View style={styles.posterWrap}>
+      <Pressable
+        focusable
+        accessibilityRole="button"
+        accessibilityLabel={item.title}
+        onPress={onPress}
+        style={({ focused, pressed }) => [
+          styles.poster,
+          { backgroundColor: palette.surfaceElevated, borderColor: palette.border },
+          focused && focusStyle(palette),
+          pressed && styles.pressed,
+        ]}
+      >
+        {poster && !failed ? (
+          <Image source={{ uri: poster }} style={styles.posterImage} onError={() => setFailed(true)} />
+        ) : (
+          <View style={styles.posterFallback}>
+            <AppIcon name={item.type === 'movie' ? 'movies' : 'series'} size={28} color={palette.muted} />
+            <Text numberOfLines={3} style={[styles.posterFallbackText, { color: palette.secondary }]}>
+              {item.title}
+            </Text>
+          </View>
+        )}
+        <View style={[styles.fill, { experimental_backgroundImage: SHASHTNA_THEME.gradients.posterBottom }]} />
+        {rating ? (
+          <View style={[styles.posterRating, ar ? styles.posterRatingRtl : styles.posterRatingLtr]}>
+            <AppIcon name="star" size={11} color={SHASHTNA_THEME.colors.rating} />
+            <Text style={styles.posterRatingText}>{rating.toFixed(1)}</Text>
+          </View>
+        ) : null}
+      </Pressable>
+
+      {onToggleFavorite ? (
+        <Pressable
+          focusable
+          onPress={onToggleFavorite}
+          accessibilityRole="button"
+          accessibilityLabel={favorite ? (ar ? 'إزالة من المفضلة' : 'Remove from favorites') : ar ? 'إضافة للمفضلة' : 'Add to favorites'}
+          style={({ focused, pressed }) => [
+            styles.favoriteButton,
+            ar ? styles.favoriteButtonRtl : styles.favoriteButtonLtr,
+            favorite && styles.favoriteButtonActive,
+            focused && focusStyle(palette, SHASHTNA_THEME.focus.iconScale),
+            pressed && styles.pressed,
+          ]}
+        >
+          <AppIcon name={favorite ? 'favorite' : 'favorites'} size={14} color="#FFFFFF" />
+        </Pressable>
+      ) : null}
+
+      <Text numberOfLines={1} style={[styles.posterTitle, { color: palette.text, textAlign: ar ? 'right' : 'left' }]}>
+        {item.title}
+      </Text>
+      <Text numberOfLines={1} style={[styles.posterMeta, { color: palette.muted, textAlign: ar ? 'right' : 'left' }]}>
+        {[item.type === 'movie' ? (ar ? 'فيلم' : 'Movie') : ar ? 'مسلسل' : 'Series', year].filter(Boolean).join(' • ')}
+      </Text>
+    </View>
+  );
+}
+
+function QuickCard({
+  icon,
+  accent,
+  title,
+  sub,
+  onPress,
+  palette,
+  ar,
+}: {
+  icon: AppIconName;
+  accent: string;
+  title: string;
+  sub: string;
+  onPress: () => void;
+  palette: Palette;
+  ar: boolean;
+}) {
+  return (
+    <Pressable
+      focusable
+      onPress={onPress}
+      style={({ focused, pressed }) => [
+        styles.quickCard,
+        { flexDirection: ar ? 'row-reverse' : 'row', backgroundColor: palette.surface, borderColor: palette.border },
+        focused && focusStyle(palette, SHASHTNA_THEME.focus.buttonScale),
+        pressed && styles.pressed,
+      ]}
+    >
+      <View style={[styles.quickIcon, { experimental_backgroundImage: accent }]}>
+        <AppIcon name={icon} size={20} color="#FFFFFF" />
+      </View>
+      <View style={styles.quickText}>
+        <Text numberOfLines={1} style={[styles.quickTitle, { color: palette.text, textAlign: ar ? 'right' : 'left' }]}>
+          {title}
+        </Text>
+        <Text numberOfLines={1} style={[styles.quickSub, { color: palette.muted, textAlign: ar ? 'right' : 'left' }]}>
+          {sub}
+        </Text>
+      </View>
     </Pressable>
-  </View>;
+  );
 }
-function QuickCard({icon,title,sub,onPress,palette}:{icon:any;title:string;sub:string;onPress:()=>void;palette:Palette}) {
-  return <Pressable focusable onPress={onPress} style={({focused,pressed})=>[styles.quickCard,focused&&styles.focused,pressed&&styles.pressed,{backgroundColor:palette.surface,borderColor:palette.border}]}>
-    <View style={styles.quickIcon}><Icon name={icon} size={18}/></View>
-    <View style={{flex:1}}><Text style={[styles.quickTitle,{color:palette.text}]}>{title}</Text><Text style={[styles.quickSub,{color:palette.muted}]}>{sub}</Text></View>
-  </Pressable>;
-}
-type Palette={background:string;surface:string;surfaceElevated:string;border:string;borderStrong:string;text:string;secondary:string;muted:string;sidebar:string;active:string;activeBorder:string};
-const darkColors:Palette={background:'#050A13',surface:'#0B1627',surfaceElevated:'#102038',border:'#203852',borderStrong:'#2D4A67',text:'#FFFFFF',secondary:'#A8B6C9',muted:'#53657C',sidebar:'#07101F',active:'rgba(23,136,255,0.16)',activeBorder:'#1788FF'};
-const lightColors:Palette={background:'#F4F7FB',surface:'#FFFFFF',surfaceElevated:'#F1F6FC',border:'#D8E4F0',borderStrong:'#B7CCE0',text:'#142B43',secondary:'#52697F',muted:'#7B8EA2',sidebar:'#FFFFFF',active:'#EAF3FF',activeBorder:'#8EC4FF'};
 
-const styles=StyleSheet.create({
-  screen:{flex:1,overflow:'hidden'},
-  topGlow:{position:'absolute',width:620,height:380,borderRadius:310,right:-220,top:-220,backgroundColor:'#0C5CA8',opacity:.08},
-  header:{height:76,paddingHorizontal:48,flexDirection:'row',alignItems:'center',justifyContent:'space-between',borderBottomWidth:1,borderBottomColor:'rgba(255,255,255,0.05)'},
-  brandSpacer:{width:1,height:1,opacity:0},
-  brandMark:{width:42,height:42,borderRadius:14,backgroundColor:'#0D5ED7',borderWidth:1,borderColor:'#43A9FF',alignItems:'center',justifyContent:'center'},
-  brandMarkText:{color:'#fff',fontSize:21,fontWeight:'900',fontFamily:SHASHTNA_FONT.sans},
-  brandArabic:{fontSize:20,fontWeight:'900',fontFamily:SHASHTNA_FONT.sans},
-  brandLatin:{fontSize:9,letterSpacing:1.8,fontWeight:'900',marginTop:2},
-  headerRight:{flexDirection:'row',alignItems:'center',gap:16},
-  search:{height:48,width:380,borderRadius:24,borderWidth:1,flexDirection:'row',alignItems:'center',paddingHorizontal:18,gap:10},
-  searchText:{fontSize:15,fontFamily:SHASHTNA_FONT.sans,flex:1},
-  headerMeta:{alignItems:'flex-end',minWidth:190},
-  headerMetaTitle:{fontSize:15,fontWeight:'900'},
-  headerMetaSub:{fontSize:13,marginTop:3},
-  body:{flex:1,flexDirection:'row',paddingHorizontal:48,paddingBottom:27},
-  sidebar:{width:184,borderRadius:18,borderWidth:1,padding:11},
-  sidebarCaption:{fontSize:11,fontWeight:'900',paddingHorizontal:8,paddingTop:4,paddingBottom:12},
-  navItem:{height:56,borderRadius:16,flexDirection:'row',alignItems:'center',paddingHorizontal:12,gap:12,marginBottom:6,borderWidth:2,borderColor:'transparent',position:'relative'},
-  navIconBox:{width:36,height:36,borderRadius:11,backgroundColor:'rgba(23,136,255,0.10)',alignItems:'center',justifyContent:'center'},
-  navText:{fontSize:SHASHTNA_THEME.typography.size.nav,fontWeight:'800',fontFamily:SHASHTNA_FONT.sans},
-  navTextActive:{fontWeight:'900'},
-  navActiveLine:{position:'absolute',left:-1,right:'auto',width:4,height:28,borderRadius:2,backgroundColor:'#58B6FF'},
-  content:{flex:1},
-  contentContainer:{paddingBottom:40},
-  hero:{height:280,borderRadius:24,borderWidth:1,overflow:'hidden',position:'relative',backgroundColor:'#081423'},
-  heroImage:{position:'absolute',left:0,top:0,right:0,bottom:0,width:'100%',height:'100%',resizeMode:'cover'},
-  heroScrimSide:{position:'absolute',left:0,top:0,bottom:0,width:'74%',backgroundColor:'rgba(4,10,19,0.72)',zIndex:1},
-  heroScrimSideRtl:{left:'auto',right:0},
-  heroScrimBottom:{position:'absolute',left:0,right:0,bottom:0,height:'42%',backgroundColor:'rgba(3,8,15,0.30)',zIndex:1},
-  heroCopy:{width:'68%',height:'100%',paddingHorizontal:40,paddingVertical:30,justifyContent:'center',zIndex:2,alignItems:'flex-start'},
-  heroCopyRtl:{alignItems:'stretch'},
-  rtlText:{writingDirection:'rtl',textAlign:'right'},
-  rtlRow:{flexDirection:'row-reverse'},
-  heroMetaRow:{flexDirection:'row',alignItems:'center',gap:14,marginTop:12,flexWrap:'wrap'},
-  heroMetaText:{fontSize:SHASHTNA_THEME.typography.size.metadata,fontWeight:'800',color:'#D3DCE8'},
-  heroTitle:{fontSize:SHASHTNA_THEME.typography.size.hero,lineHeight:SHASHTNA_THEME.typography.lineHeight.hero,fontWeight:'900',fontFamily:SHASHTNA_FONT.display,maxWidth:'100%'},
-  heroDesc:{fontSize:SHASHTNA_THEME.typography.size.bodyLarge,lineHeight:SHASHTNA_THEME.typography.lineHeight.bodyLarge,marginTop:12,maxWidth:720,fontFamily:SHASHTNA_FONT.sans},
-  actions:{flexDirection:'row',gap:12,marginTop:20,alignItems:'center',flexWrap:'nowrap'},
-  primaryButton:{height:48,minWidth:150,paddingHorizontal:20,borderRadius:24,backgroundColor:'#1788FF',flexDirection:'row',alignItems:'center',justifyContent:'center',gap:9,borderWidth:2,borderColor:'rgba(255,255,255,0.10)'},
-  primaryButtonText:{color:'#fff',fontSize:SHASHTNA_THEME.typography.size.button,fontWeight:'900'},
-  rtlButtonText:{writingDirection:'rtl',textAlign:'right'},
-  secondaryButton:{height:48,minWidth:168,paddingHorizontal:20,borderRadius:24,borderWidth:1,flexDirection:'row',alignItems:'center',justifyContent:'center',gap:9},
-  secondaryButtonText:{fontSize:SHASHTNA_THEME.typography.size.button,fontWeight:'800'},
-  sectionHeader:{marginTop:40,marginBottom:16,flexDirection:'row',alignItems:'center',justifyContent:'space-between'},
-  sectionTitle:{fontSize:SHASHTNA_THEME.typography.size.section,lineHeight:28,fontWeight:'900',fontFamily:SHASHTNA_FONT.sans},
-  viewAll:{height:40,paddingHorizontal:14,borderRadius:20,flexDirection:'row',alignItems:'center',gap:7,borderWidth:2,borderColor:'transparent'},
-  viewAllText:{fontSize:SHASHTNA_THEME.typography.size.secondary,fontWeight:'800'},
-  row:{gap:12,paddingHorizontal:6,paddingBottom:8,paddingTop:10},
-  mediaCard:{borderRadius:14,borderWidth:2,borderColor:'transparent',paddingBottom:2,overflow:'visible'},
-  posterWrap:{width:SHASHTNA_THEME.layout.compactW,overflow:'visible'},
-  poster:{borderRadius:16,overflow:'hidden',backgroundColor:'#0B1627',borderWidth:1},
-  posterImage:{width:'100%',height:'100%',resizeMode:'cover'},
-  posterFallback:{flex:1,alignItems:'center',justifyContent:'center',backgroundColor:'#102038'},
-  posterTitle:{fontSize:SHASHTNA_THEME.typography.size.cardTitle,fontWeight:'800',lineHeight:22,marginTop:9,paddingHorizontal:2},
-  favoriteButton:{position:'absolute',right:8,top:8,width:34,height:34,borderRadius:12,backgroundColor:'rgba(3,10,18,.78)',alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:'rgba(255,255,255,.16)'},
-  favoriteButtonActive:{backgroundColor:'rgba(23,136,255,.84)',borderColor:'#7CC4FF'},
-  favoriteButtonFocused:{borderColor:'#FFFFFF',borderWidth:2,transform:[{scale:1.08}]},
-  favoriteButtonPressed:{opacity:.78},
-  focused:{transform:[{scale:1.08}],borderColor:'#FFFFFF',borderWidth:2,backgroundColor:'rgba(255,255,255,0.05)',shadowColor:'#030810',shadowOpacity:.28,shadowRadius:8,elevation:6,zIndex:50},
-  pressed:{opacity:.84},
-  categoryRow:{marginTop:32,flexDirection:'row',gap:16},
-  quickCard:{flex:1,minHeight:92,borderRadius:20,borderWidth:1,padding:16,flexDirection:'row',alignItems:'center',gap:14},
-  quickIcon:{width:44,height:44,borderRadius:14,backgroundColor:'rgba(23,136,255,.12)',alignItems:'center',justifyContent:'center'},
-  quickTitle:{fontSize:SHASHTNA_THEME.typography.size.button,fontWeight:'900'},
-  quickSub:{fontSize:SHASHTNA_THEME.typography.size.caption,marginTop:4},
+const L = SHASHTNA_THEME.layout;
+const T = SHASHTNA_THEME.typography;
+
+const styles = StyleSheet.create({
+  screen: { flex: 1, overflow: 'hidden' },
+  content: { flex: 1 },
+  contentContainer: { paddingHorizontal: L.contentX, paddingTop: 24, paddingBottom: 48 },
+  fill: { position: 'absolute', left: 0, top: 0, right: 0, bottom: 0 },
+  flipX: { transform: [{ scaleX: -1 }] },
+
+  hero: { height: L.heroH, borderRadius: 26, borderWidth: 1, overflow: 'hidden', position: 'relative' },
+  heroImage: { position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, width: '100%', height: '100%' },
+  heroPlaceholder: { experimental_backgroundImage: 'linear-gradient(120deg, #0C1B36 0%, #1560DB 60%, #5CC4FF 100%)', opacity: 0.35 },
+  heroCopy: { position: 'absolute', top: 0, bottom: 0, width: '62%', paddingHorizontal: 36, justifyContent: 'center' },
+  heroCopyLtr: { left: 0, alignItems: 'flex-start' },
+  heroCopyRtl: { right: 0, alignItems: 'flex-end' },
+  heroBadgeRow: { alignItems: 'center', gap: 10, marginBottom: 10 },
+  heroBadge: { height: 24, paddingHorizontal: 10, borderRadius: 7, justifyContent: 'center', experimental_backgroundImage: SHASHTNA_THEME.gradients.brand },
+  heroBadgeText: { color: '#FFFFFF', fontSize: 12, fontWeight: '900', letterSpacing: 0.5 },
+  heroKind: { fontSize: T.size.metadata, fontWeight: '800' },
+  heroTitle: { fontSize: T.size.hero, lineHeight: T.lineHeight.hero, fontWeight: '900', fontFamily: SHASHTNA_FONT.display },
+  heroMetaRow: { alignItems: 'center', gap: 8, marginTop: 12 },
+  metaPill: { height: 26, paddingHorizontal: 10, borderRadius: 13, backgroundColor: 'rgba(255,255,255,0.10)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 5 },
+  metaPillText: { color: '#FFFFFF', fontSize: 13, fontWeight: '900' },
+  heroDesc: { fontSize: T.size.body, lineHeight: T.lineHeight.body, marginTop: 12, fontFamily: SHASHTNA_FONT.sans },
+  actions: { gap: 12, marginTop: 20, alignItems: 'center' },
+  primaryButton: { height: 50, paddingHorizontal: 24, borderRadius: 25, alignItems: 'center', justifyContent: 'center', gap: 10, borderWidth: 2, borderColor: 'transparent', experimental_backgroundImage: SHASHTNA_THEME.gradients.brand, boxShadow: SHASHTNA_THEME.shadows.brand },
+  primaryButtonText: { color: '#FFFFFF', fontSize: T.size.button, fontWeight: '900' },
+  secondaryButton: { height: 50, paddingHorizontal: 22, borderRadius: 25, borderWidth: 2, alignItems: 'center', justifyContent: 'center', gap: 9 },
+  secondaryButtonText: { fontSize: T.size.button, fontWeight: '800' },
+  heroDots: { position: 'absolute', bottom: 18, gap: 6, alignItems: 'center' },
+  heroDotsLtr: { right: 24 },
+  heroDotsRtl: { left: 24 },
+  heroDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.35)' },
+  heroDotActive: { width: 22, backgroundColor: '#FFFFFF' },
+
+  quickRow: { marginTop: 22, gap: 14 },
+  quickCard: { flex: 1, height: 78, borderRadius: 20, borderWidth: 1, paddingHorizontal: 14, alignItems: 'center', gap: 12 },
+  quickIcon: { width: 46, height: 46, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+  quickText: { flex: 1, minWidth: 0 },
+  quickTitle: { fontSize: T.size.button, fontWeight: '900' },
+  quickSub: { fontSize: T.size.caption, marginTop: 3, fontWeight: '700' },
+
+  section: { marginTop: SHASHTNA_THEME.spacing.section },
+  sectionHeader: { alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
+  sectionTitleWrap: { alignItems: 'center', gap: 10 },
+  sectionAccent: { width: 4, height: 20, borderRadius: 2, experimental_backgroundImage: SHASHTNA_THEME.gradients.brand },
+  sectionTitle: { fontSize: T.size.section, lineHeight: T.lineHeight.section, fontWeight: '900', fontFamily: SHASHTNA_FONT.sans },
+  viewAll: { height: 38, paddingHorizontal: 14, borderRadius: 19, alignItems: 'center', gap: 6, borderWidth: 2, borderColor: 'transparent' },
+  viewAllText: { fontSize: T.size.secondary, fontWeight: '800' },
+
+  row: { gap: L.rowGap, paddingHorizontal: 6, paddingTop: 12, paddingBottom: 10 },
+  posterWrap: { width: L.compactW, position: 'relative' },
+  poster: { width: L.compactW, height: L.compactH, borderRadius: 16, overflow: 'hidden', borderWidth: 1 },
+  posterImage: { width: '100%', height: '100%', resizeMode: 'cover' },
+  posterFallback: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 12, gap: 10, experimental_backgroundImage: 'linear-gradient(160deg, #13203A 0%, #0A101C 100%)' },
+  posterFallbackText: { fontSize: 13, lineHeight: 18, fontWeight: '800', textAlign: 'center' },
+  posterRating: { position: 'absolute', bottom: 8, height: 22, paddingHorizontal: 7, borderRadius: 11, backgroundColor: 'rgba(2,4,9,0.78)', flexDirection: 'row', alignItems: 'center', gap: 4 },
+  posterRatingLtr: { left: 8 },
+  posterRatingRtl: { right: 8 },
+  posterRatingText: { color: '#FFFFFF', fontSize: 12, fontWeight: '900' },
+  favoriteButton: { position: 'absolute', top: 8, width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(2,4,9,0.72)', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)', zIndex: 60 },
+  favoriteButtonLtr: { right: 8 },
+  favoriteButtonRtl: { left: 8 },
+  favoriteButtonActive: { backgroundColor: '#FF4D7A', borderColor: 'rgba(255,255,255,0.4)' },
+  posterTitle: { fontSize: T.size.cardTitle, lineHeight: T.lineHeight.cardTitle, fontWeight: '800', marginTop: 10, paddingHorizontal: 2 },
+  posterMeta: { fontSize: 12, marginTop: 2, fontWeight: '700', paddingHorizontal: 2 },
+
+  pressed: { opacity: 0.84 },
 });
-
-
