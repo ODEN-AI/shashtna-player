@@ -1,9 +1,7 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Alert,
   FlatList,
   Image,
-  ImageBackground,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -12,10 +10,11 @@ import {
   View,
 } from 'react-native';
 import { M3UChannel } from '../../lib/m3u';
-import { getTmdbMetadata, tmdbImageUrl } from '../../lib/tmdb';
+import { getTmdbMetadata } from '../../lib/tmdb';
 import AppIcon from './AppIcon';
 import { SHASHTNA_FONT, SHASHTNA_THEME } from '../../design/theme';
 import { useAppPreferences } from '../../design/AppPreferencesContext';
+import { focusStyle, Palette, usePalette } from '../../design/palette';
 
 type MediaType = 'movie' | 'series';
 type PageName = 'home'|'live'|'movies'|'series'|'favorites'|'search'|'settings';
@@ -59,93 +58,79 @@ function buildItems(channels: M3UChannel[], type: MediaType): Item[] {
   return [...map.values()];
 }
 
-function useOptionalMetadata(item: Item | undefined, type: MediaType) {
-  const [metadata, setMetadata] = useState<any>(null);
-
-  useEffect(() => {
-    let alive = true;
-    if (!item) {
-      setMetadata(null);
-      return () => { alive = false; };
-    }
-
-    getTmdbMetadata({ ...item.channel, name: item.title }, type)
-      .then(value => { if (alive) setMetadata(value); })
-      .catch(() => {});
-
-    return () => { alive = false; };
-  }, [item?.channel, item?.title, type]);
-
-  return metadata;
-}
-
-function MediaCard({ item, type, onPress, isFavorite, onToggleFavorite }: { item: Item; type: MediaType; onPress: () => void; isFavorite?: boolean; onToggleFavorite?: (channel: M3UChannel) => void }) {
-  const { language } = useAppPreferences();
-  const ar = language === 'ar';
+function MediaCard({ item, type, onPress, isFavorite, onToggleFavorite, palette, ar }: { item: Item; type: MediaType; onPress: () => void; isFavorite?: boolean; onToggleFavorite?: (channel: M3UChannel) => void; palette: Palette; ar: boolean }) {
   const [failed, setFailed] = useState(false);
   const poster = item.channel.logo || '';
   const title = item.title;
   const rawYear = (item.channel as any).releaseDate;
   const year = rawYear && /^\d{4}/.test(String(rawYear)) ? String(rawYear).slice(0, 4) : '';
+  const typeLabel = type === 'movie' ? (ar ? 'فيلم' : 'Movie') : (ar ? 'مسلسل' : 'Series');
+  const meta = type === 'series'
+    ? `${item.episodeCount} ${ar ? 'حلقة' : item.episodeCount === 1 ? 'Episode' : 'Episodes'}${year ? ` • ${year}` : ''}`
+    : year || item.group || typeLabel;
 
   return (
-    <Pressable
-      focusable
-      accessibilityRole="button"
-      accessibilityLabel={`${type === 'movie' ? (ar ? 'ÙÙŠÙ„Ù…' : 'Movie') : (ar ? 'Ù…Ø³Ù„Ø³Ù„' : 'Series')} ${title}`}
-      onPress={onPress}
-      style={({ focused, pressed }) => [styles.mediaCard, focused && styles.mediaCardFocused, pressed && styles.mediaCardPressed]}
-    >
-      <View style={styles.posterFrame}>
+    <View style={styles.cardWrap}>
+      <Pressable
+        focusable
+        accessibilityRole="button"
+        accessibilityLabel={`${typeLabel} ${title}`}
+        onPress={onPress}
+        style={({ focused, pressed }) => [
+          styles.posterFrame,
+          { backgroundColor: palette.surfaceElevated, borderColor: palette.border },
+          focused && focusStyle(palette),
+          pressed && styles.pressed,
+        ]}
+      >
         {poster && !failed ? (
           <Image source={{ uri: poster }} style={styles.posterImage} resizeMode="cover" onError={() => setFailed(true)} />
         ) : (
           <View style={styles.posterFallback}>
-            <AppIcon name={type === 'movie' ? 'movies' : 'series'} size={31} />
+            <AppIcon name={type === 'movie' ? 'movies' : 'series'} size={28} color={palette.muted} />
+            <Text numberOfLines={3} style={[styles.posterFallbackText, { color: palette.secondary }]}>{title}</Text>
           </View>
         )}
         <View style={styles.posterFade} />
-        {onToggleFavorite ? (
-          <Pressable
-            focusable
-            accessibilityRole="button"
-            accessibilityLabel={isFavorite ? (ar ? 'Ø¥Ø²Ø§Ù„Ø© Ù…Ù† Ù‚Ø§Ø¦Ù…ØªÙŠ' : 'Remove from My List') : (ar ? 'Ø¥Ø¶Ø§ÙØ© Ø¥Ù„Ù‰ Ù‚Ø§Ø¦Ù…ØªÙŠ' : 'Add to My List')}
-            onPress={(event: any) => {
-              event?.stopPropagation?.();
-              onToggleFavorite(item.channel);
-            }}
-            style={({ focused, pressed }) => [
-              styles.favoriteButton,
-              isFavorite && styles.favoriteButtonActive,
-              focused && styles.focusRing,
-              pressed && styles.pressed,
-            ]}
-          >
-            <AppIcon
-              name={isFavorite ? 'favorite' : 'favorites'}
-              size={13}
-              color={isFavorite ? SHASHTNA_THEME.colors.rating : SHASHTNA_THEME.colors.primaryLight}
-            />
-          </Pressable>
+        {type === 'series' ? (
+          <View style={[styles.episodesBadge, ar ? styles.badgeRtl : styles.badgeLtr]}>
+            <Text style={styles.episodesText}>{item.episodeCount}</Text>
+            <AppIcon name="series" size={11} color="#FFFFFF" />
+          </View>
         ) : null}
-        <View style={styles.mediaTypeBadge}>
-          <View style={styles.mediaTypeDot} />
-          <Text style={styles.mediaTypeText}>{type === 'movie' ? (ar ? 'ÙÙŠÙ„Ù…' : 'Movie') : (ar ? 'Ù…Ø³Ù„Ø³Ù„' : 'Series')}</Text>
-        </View>
-      </View>
-      <View style={styles.mediaInfo}>
-        <Text numberOfLines={2} style={styles.mediaName}>{title}</Text>
-        <Text numberOfLines={1} style={styles.mediaMeta}>{type === 'series' ? `${item.episodeCount} ${ar ? 'Ø­Ù„Ù‚Ø©' : item.episodeCount === 1 ? 'Episode' : 'Episodes'}${year ? ` â€¢ ${year}` : ''}` : year || item.group || (ar ? 'ÙÙŠÙ„Ù…' : 'Movie')}</Text>
-      </View>
-    </Pressable>
+      </Pressable>
+      {onToggleFavorite ? (
+        <Pressable
+          focusable
+          accessibilityRole="button"
+          accessibilityLabel={isFavorite ? (ar ? 'إزالة من قائمتي' : 'Remove from My List') : (ar ? 'إضافة إلى قائمتي' : 'Add to My List')}
+          onPress={(event: any) => {
+            event?.stopPropagation?.();
+            onToggleFavorite(item.channel);
+          }}
+          style={({ focused, pressed }) => [
+            styles.favoriteButton,
+            ar ? styles.favoriteRtl : styles.favoriteLtr,
+            isFavorite && styles.favoriteButtonActive,
+            focused && focusStyle(palette, SHASHTNA_THEME.focus.iconScale),
+            pressed && styles.pressed,
+          ]}
+        >
+          <AppIcon name={isFavorite ? 'favorite' : 'favorites'} size={14} color="#FFFFFF" />
+        </Pressable>
+      ) : null}
+      <Text numberOfLines={1} style={[styles.mediaName, { color: palette.text, textAlign: ar ? 'right' : 'left' }]}>{title}</Text>
+      <Text numberOfLines={1} style={[styles.mediaMeta, { color: palette.muted, textAlign: ar ? 'right' : 'left' }]}>{meta}</Text>
+    </View>
   );
 }
 
-function Chip({ label, icon, active, onPress }: {
+function Chip({ label, icon, active, onPress, palette }: {
   label: string;
   icon?: import('./AppIcon').AppIconName;
   active?: boolean;
   onPress: () => void;
+  palette: Palette;
 }) {
   return (
     <Pressable
@@ -153,38 +138,41 @@ function Chip({ label, icon, active, onPress }: {
       onPress={onPress}
       style={({ focused, pressed }) => [
         styles.chip,
+        { backgroundColor: palette.surface, borderColor: palette.border },
         active && styles.chipActive,
-        focused && styles.focusRing,
+        focused && focusStyle(palette, SHASHTNA_THEME.focus.buttonScale),
         pressed && styles.pressed,
       ]}
     >
-      {icon ? <AppIcon name={icon} size={13} color={active ? SHASHTNA_THEME.colors.white : SHASHTNA_THEME.colors.primaryLight} /> : null}
-      <Text style={[styles.chipText, active && styles.chipTextActive]}>{label}</Text>
+      {icon ? <AppIcon name={icon} size={13} color={active ? '#FFFFFF' : palette.primaryText} /> : null}
+      <Text style={[styles.chipText, { color: active ? '#FFFFFF' : palette.secondary }]}>{label}</Text>
     </Pressable>
   );
 }
 
-export default function MediaLibraryScreen({ type, title, channels, onOpenPlayer, onNavigate, onBack, favoriteIds = [], onToggleFavorite }: Props) {
-  const { language, themeMode } = useAppPreferences();
+export default function MediaLibraryScreen({ type, title, channels, onOpenPlayer, onBack, favoriteIds = [], onToggleFavorite }: Props) {
+  const { language } = useAppPreferences();
+  const palette = usePalette();
   const ar = language === 'ar';
-  const light = themeMode === 'light';
+  const rowDirection = ar ? 'row-reverse' : 'row';
   const items = useMemo(() => buildItems(channels, type), [channels, type]);
   const favoriteSet = useMemo(() => new Set(favoriteIds), [favoriteIds]);
   const groups = useMemo(
-    () => [ar ? 'Ø§Ù„ÙƒÙ„' : 'All', ...Array.from(new Set(items.map(i => i.group).filter(Boolean))).slice(0, 18)],
+    () => [ar ? 'الكل' : 'All', ...Array.from(new Set(items.map(i => i.group).filter(Boolean))).slice(0, 18)],
     [items, ar],
   );
   const [query, setQuery] = useState('');
-  const [group, setGroup] = useState(ar ? 'Ø§Ù„ÙƒÙ„' : 'All');
+  const [group, setGroup] = useState(ar ? 'الكل' : 'All');
   const [sort, setSort] = useState<SortMode>('latest');
   const [ratings, setRatings] = useState<Record<string, number>>({});
+  const [searchFocused, setSearchFocused] = useState(false);
 
-  useEffect(() => { setGroup(ar ? 'Ø§Ù„ÙƒÙ„' : 'All'); }, [ar]);
+  useEffect(() => { setGroup(ar ? 'الكل' : 'All'); }, [ar]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     const arr = items.filter(i =>
-      (group === (ar ? 'Ø§Ù„ÙƒÙ„' : 'All') || i.group === group) &&
+      (group === (ar ? 'الكل' : 'All') || i.group === group) &&
       (!q || i.title.toLowerCase().includes(q) || i.group.toLowerCase().includes(q)),
     );
     if (sort === 'az') arr.sort((a, b) => a.title.localeCompare(b.title, ar ? 'ar' : 'en'));
@@ -209,45 +197,62 @@ export default function MediaLibraryScreen({ type, title, channels, onOpenPlayer
     return () => { alive = false; };
   }, [sort, type, filtered.length, filtered.slice(0, 20).map(item => String(item.channel.id)).join('|')]);
 
-  const reset = () => { setQuery(''); setGroup(ar ? 'Ø§Ù„ÙƒÙ„' : 'All'); setSort('latest'); };
+  const reset = () => { setQuery(''); setGroup(ar ? 'الكل' : 'All'); setSort('latest'); };
 
   return (
-    <View style={[styles.screen, { backgroundColor: light ? '#F4F7FB' : SHASHTNA_THEME.colors.background }]}>
-      <View style={[styles.header, { flexDirection: ar ? 'row-reverse' : 'row' }]}>
+    <View style={[styles.screen, { backgroundColor: palette.background }]}>
+      <View style={[styles.header, { flexDirection: rowDirection }]}>
         <View style={styles.headerTitleWrap}>
-          <Text style={styles.eyebrow}>{type === 'movie' ? 'MOVIES' : 'SERIES'}</Text>
-          <Text style={[styles.pageTitle, { textAlign: ar ? 'right' : 'left' }]}>{title}</Text>
-          <Text style={[styles.pageSub, { textAlign: ar ? 'right' : 'left' }]}>{filtered.length.toLocaleString(ar ? 'ar-IQ' : 'en-US')} {type === 'movie' ? (ar ? 'ÙÙŠÙ„Ù… Ù…ØªØ§Ø­' : 'titles available') : (ar ? 'Ù…Ø³Ù„Ø³Ù„ Ù…ØªØ§Ø­' : 'series available')}</Text>
+          <Text style={[styles.eyebrow, { color: palette.primaryText, textAlign: ar ? 'right' : 'left' }]}>{type === 'movie' ? 'MOVIES' : 'SERIES'}</Text>
+          <Text style={[styles.pageTitle, { color: palette.text, textAlign: ar ? 'right' : 'left' }]}>{title}</Text>
+          <Text style={[styles.pageSub, { color: palette.muted, textAlign: ar ? 'right' : 'left' }]}>{filtered.length.toLocaleString(ar ? 'ar-IQ' : 'en-US')} {type === 'movie' ? (ar ? 'فيلم متاح' : 'titles available') : (ar ? 'مسلسل متاح' : 'series available')}</Text>
         </View>
-        <View style={[styles.headerTools, { flexDirection: ar ? 'row-reverse' : 'row' }]}>
-          <Pressable focusable onPress={onBack} style={({ focused, pressed }) => [styles.backButton, focused && styles.focusRing, pressed && styles.pressed]}>
-            <AppIcon name="back" size={20} />
-            <Text style={styles.backText}>{ar ? 'Ø±Ø¬ÙˆØ¹' : 'Back'}</Text>
-          </Pressable>
-          <View style={styles.searchBox}>
-            <AppIcon name="search" size={19} />
+        <View style={[styles.headerTools, { flexDirection: rowDirection }]}>
+          <View style={[styles.searchBox, { flexDirection: rowDirection, backgroundColor: palette.surface, borderColor: searchFocused ? palette.focus : palette.border }]}>
+            <AppIcon name="search" size={18} color={palette.muted} />
             <TextInput
               value={query}
               onChangeText={setQuery}
-              placeholder={ar ? `Ø§Ø¨Ø­Ø« Ø¹Ù† ${type === 'movie' ? 'ÙÙŠÙ„Ù…' : 'Ù…Ø³Ù„Ø³Ù„'}...` : `Search ${type === 'movie' ? 'movies' : 'series'}...`}
-              placeholderTextColor={SHASHTNA_THEME.colors.textMuted}
-              style={styles.searchInput}
+              onFocus={() => setSearchFocused(true)}
+              onBlur={() => setSearchFocused(false)}
+              placeholder={ar ? `ابحث عن ${type === 'movie' ? 'فيلم' : 'مسلسل'}...` : `Search ${type === 'movie' ? 'movies' : 'series'}...`}
+              placeholderTextColor={palette.muted}
+              style={[styles.searchInput, { color: palette.text, textAlign: ar ? 'right' : 'left' }]}
             />
           </View>
+          <Pressable
+            focusable
+            accessibilityLabel={ar ? 'رجوع' : 'Back'}
+            onPress={onBack}
+            style={({ focused, pressed }) => [
+              styles.iconButton,
+              { backgroundColor: palette.surface, borderColor: palette.border },
+              focused && focusStyle(palette, SHASHTNA_THEME.focus.iconScale),
+              pressed && styles.pressed,
+            ]}
+          >
+            <View style={ar ? styles.flipX : undefined}>
+              <AppIcon name="back" size={19} color={palette.secondary} />
+            </View>
+          </Pressable>
         </View>
       </View>
 
-      <View style={styles.toolbar}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.chipRow, { flexDirection: ar ? 'row-reverse' : 'row' }]}>
-          {groups.map(g => <Chip key={g} label={g} active={group === g} onPress={() => setGroup(g)} />)}
+      <View style={[styles.toolbar, { flexDirection: rowDirection }]}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll} contentContainerStyle={[styles.chipRow, { flexDirection: rowDirection }]}>
+          {groups.map(g => <Chip key={g} label={g} active={group === g} onPress={() => setGroup(g)} palette={palette} />)}
         </ScrollView>
-        <View style={styles.sortGroup}>
-          <Chip label={ar ? 'Ø§Ù„Ø£Ø­Ø¯Ø«' : 'Latest'} active={sort === 'latest'} onPress={() => setSort('latest')} />
-          <Chip label={ar ? 'Ø§Ù„ØªÙ‚ÙŠÙŠÙ…' : 'Rating'} active={sort === 'rating'} onPress={() => setSort('rating')} icon="star" />
-          <Chip label="A-Z" active={sort === 'az'} onPress={() => setSort('az')} icon="filter" />
-          <Pressable focusable onPress={reset} style={({ focused, pressed }) => [styles.resetButton, focused && styles.focusRing, pressed && styles.pressed]}>
-            <AppIcon name="refresh" size={17} />
-            <Text style={styles.resetText}>{ar ? 'Ø¥Ø¹Ø§Ø¯Ø©' : 'Reset'}</Text>
+        <View style={[styles.sortGroup, { flexDirection: rowDirection, backgroundColor: palette.surface, borderColor: palette.border }]}>
+          <Chip label={ar ? 'الأحدث' : 'Latest'} active={sort === 'latest'} onPress={() => setSort('latest')} palette={palette} />
+          <Chip label={ar ? 'التقييم' : 'Rating'} active={sort === 'rating'} onPress={() => setSort('rating')} icon="star" palette={palette} />
+          <Chip label="A-Z" active={sort === 'az'} onPress={() => setSort('az')} palette={palette} />
+          <Pressable
+            focusable
+            accessibilityLabel={ar ? 'إعادة' : 'Reset'}
+            onPress={reset}
+            style={({ focused, pressed }) => [styles.resetButton, focused && focusStyle(palette, SHASHTNA_THEME.focus.iconScale), pressed && styles.pressed]}
+          >
+            <AppIcon name="refresh" size={17} color={palette.secondary} />
           </Pressable>
         </View>
       </View>
@@ -255,8 +260,8 @@ export default function MediaLibraryScreen({ type, title, channels, onOpenPlayer
       <FlatList
         data={filtered}
         keyExtractor={i => `${type}:${i.channel.id}`}
-        numColumns={5}
-        columnWrapperStyle={[styles.gridRow, { flexDirection: ar ? 'row-reverse' : 'row' }]}
+        numColumns={SHASHTNA_THEME.layout.gridColumns}
+        columnWrapperStyle={[styles.gridRow, { flexDirection: rowDirection }]}
         contentContainerStyle={styles.grid}
         showsVerticalScrollIndicator={false}
         renderItem={({ item }) => (
@@ -266,9 +271,11 @@ export default function MediaLibraryScreen({ type, title, channels, onOpenPlayer
             onPress={() => onOpenPlayer(item.channel)}
             isFavorite={favoriteSet.has(`${type}:${item.channel.id}`)}
             onToggleFavorite={onToggleFavorite}
+            palette={palette}
+            ar={ar}
           />
         )}
-        ListEmptyComponent={<Empty type={type} />}
+        ListEmptyComponent={<Empty type={type} palette={palette} ar={ar} />}
         removeClippedSubviews
         initialNumToRender={15}
         maxToRenderPerBatch={10}
@@ -278,70 +285,67 @@ export default function MediaLibraryScreen({ type, title, channels, onOpenPlayer
   );
 }
 
-function Empty({ type }: { type: MediaType }) {
-  const { language } = useAppPreferences();
-  const ar = language === 'ar';
-
+function Empty({ type, palette, ar }: { type: MediaType; palette: Palette; ar: boolean }) {
   return (
     <View style={styles.empty}>
-      <View style={styles.emptyIcon}>
-        <AppIcon name={type === 'movie' ? 'movies' : 'series'} size={28} />
+      <View style={[styles.emptyIcon, { backgroundColor: palette.primarySoft }]}>
+        <AppIcon name={type === 'movie' ? 'movies' : 'series'} size={28} color={palette.primaryText} />
       </View>
-      <Text style={styles.emptyTitle}>
-        {ar ? 'Ù…Ø§ÙƒÙˆ Ù…Ø­ØªÙˆÙ‰ Ù…Ø·Ø§Ø¨Ù‚' : 'No matching content'}
+      <Text style={[styles.emptyTitle, { color: palette.text }]}>
+        {ar ? 'ماكو محتوى مطابق' : 'No matching content'}
       </Text>
-      <Text style={styles.emptyText}>
-        {ar ? 'Ø¬Ø±Ù‘Ø¨ ØªØºÙŠÙŠØ± Ø§Ù„Ø¨Ø­Ø« Ø£Ùˆ Ø§Ù„ØªØµÙ†ÙŠÙ Ø­ØªÙ‰ ØªØ¸Ù‡Ø± Ø§Ù„Ù†ØªØ§Ø¦Ø¬.' : 'Try changing the search or filter.'}
+      <Text style={[styles.emptyText, { color: palette.muted }]}>
+        {ar ? 'جرّب تغيير البحث أو التصنيف حتى تظهر النتائج.' : 'Try changing the search or filter.'}
       </Text>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, paddingHorizontal: 24, paddingTop: 27, paddingBottom: 27 },
-  header: { minHeight: 76, alignItems: 'center', justifyContent: 'space-between', marginBottom: 24, gap: 24 },
-  headerTitleWrap: { flex: 1 },
-  headerTools: { alignItems: 'center', gap: 16 },
-  eyebrow: { color: '#58B6FF', fontSize: 13, fontWeight: '900', letterSpacing: 2 },
-  pageTitle: { color: '#fff', fontSize: 32, lineHeight: 40, fontWeight: '900', fontFamily: SHASHTNA_FONT.display, marginTop: 2 },
-  pageSub: { color: '#91A6BD', fontSize: 15, marginTop: 4 },
-  backButton: { height: 48, minWidth: 108, borderRadius: 24, borderWidth: 2, borderColor: SHASHTNA_THEME.colors.border, backgroundColor: SHASHTNA_THEME.colors.surface, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 16 },
-  backText: { color: '#EAF2FA', fontSize: 15, fontWeight: '800' },
-  searchBox: { width: 390, height: 48, borderRadius: 24, borderWidth: 1, borderColor: SHASHTNA_THEME.colors.border, backgroundColor: SHASHTNA_THEME.colors.surface, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 18, gap: 10 },
-  searchInput: { flex: 1, color: '#fff', fontFamily: SHASHTNA_FONT.sans, fontSize: 16, paddingVertical: 0 },
-  toolbar: { minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginBottom: 20 },
-  chipRow: { gap: 8, alignItems: 'center', paddingVertical: 3, paddingHorizontal: 3 },
-  sortGroup: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  chip: { height: 40, minHeight: 40, borderRadius: 20, borderWidth: 2, borderColor: SHASHTNA_THEME.colors.border, backgroundColor: SHASHTNA_THEME.colors.surface, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
-  chipActive: { backgroundColor: SHASHTNA_THEME.colors.primarySoft, borderColor: SHASHTNA_THEME.colors.primary },
-  chipText: { color: SHASHTNA_THEME.colors.textSecondary, fontFamily: SHASHTNA_FONT.sans, fontSize: 15, fontWeight: '800' },
-  chipTextActive: { color: '#fff' },
-  resetButton: { height: 40, minWidth: 92, borderRadius: 20, borderWidth: 2, borderColor: SHASHTNA_THEME.colors.border, backgroundColor: SHASHTNA_THEME.colors.surface, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingHorizontal: 16 },
-  resetText: { color: '#C4D2E2', fontSize: 15, fontWeight: '800' },
-  grid: { paddingBottom: 40, paddingTop: 8 },
-  gridRow: { gap: 12, marginBottom: 32 },
-  mediaCard: { width: 136, borderRadius: 16, borderWidth: 2, borderColor: 'transparent', overflow: 'visible', paddingBottom: 2 },
-  mediaCardFocused: { borderColor: '#FFFFFF', backgroundColor: 'rgba(255,255,255,0.05)', transform: [{ scale: 1.08 }], shadowColor: '#030810', shadowOpacity: .28, shadowRadius: 8, elevation: 6, zIndex: 50 },
-  mediaCardPressed: { opacity: .84 },
-  posterFrame: { width: 136, height: 204, borderRadius: 16, backgroundColor: '#0A1B30', position: 'relative', overflow: 'hidden', borderWidth: 1, borderColor: SHASHTNA_THEME.colors.border },
-  posterImage: { width: '100%', height: '100%' },
-  posterFallback: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#10233B' },
-  posterFade: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 64, backgroundColor: 'rgba(2,9,19,.35)' },
-  favoriteButton: { position: 'absolute', right: 8, top: 8, width: 34, height: 34, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,.16)', backgroundColor: 'rgba(3,13,25,.82)', alignItems: 'center', justifyContent: 'center' },
-  favoriteButtonActive: { backgroundColor: 'rgba(23,136,255,.84)', borderColor: '#7CC4FF' },
-  mediaTypeBadge: { position: 'absolute', left: 8, top: 8, height: 28, borderRadius: 14, borderWidth: 1, borderColor: 'rgba(110,186,255,.28)', backgroundColor: 'rgba(3,13,25,.84)', paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', gap: 6 },
-  mediaTypeDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#58B6FF' },
-  mediaTypeText: { color: '#E7F2FF', fontSize: 12, fontWeight: '900' },
-  mediaRating: { position: 'absolute', right: 8, bottom: 8, height: 28, minWidth: 48, borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,200,87,.28)', backgroundColor: 'rgba(3,13,25,.84)', paddingHorizontal: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4 },
-  mediaRatingText: { color: '#F5F8FD', fontSize: 12, fontWeight: '900' },
-  mediaInfo: { minHeight: 76, paddingHorizontal: 4, paddingVertical: 9 },
-  mediaName: { color: '#fff', fontSize: 16, lineHeight: 22, fontWeight: '900' },
-  mediaMeta: { color: '#91A6BD', fontSize: 14, marginTop: 6, fontWeight: '700' },
-  empty: { minHeight: 360, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 48 },
-  emptyIcon: { width: 72, height: 72, borderRadius: 24, backgroundColor: '#0A2947', borderWidth: 1, borderColor: '#205A8B', alignItems: 'center', justifyContent: 'center' },
-  emptyTitle: { color: '#fff', fontSize: 20, fontWeight: '900', marginTop: 14 },
-  emptyText: { color: '#8195AA', fontSize: 15, textAlign: 'center', marginTop: 7, lineHeight: 24, maxWidth: 560 },
-  focusRing: { borderColor: '#FFFFFF', borderWidth: 2, backgroundColor: 'rgba(255,255,255,0.05)', shadowColor: '#030810', shadowOpacity: .28, shadowRadius: 8, elevation: 6, zIndex: 50 },
-  pressed: { opacity: .84 },
-});
+const T = SHASHTNA_THEME.typography;
+const CARD_W = 128;
+const CARD_H = 192;
 
+const styles = StyleSheet.create({
+  screen: { flex: 1, paddingHorizontal: SHASHTNA_THEME.layout.contentX, paddingTop: 26 },
+  header: { alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 18, gap: 20 },
+  headerTitleWrap: { flex: 1 },
+  headerTools: { alignItems: 'center', gap: 12 },
+  eyebrow: { fontSize: 12, fontWeight: '900', letterSpacing: 2.4 },
+  pageTitle: { fontSize: T.size.pageTitle, lineHeight: T.lineHeight.pageTitle, fontWeight: '900', fontFamily: SHASHTNA_FONT.display, marginTop: 4 },
+  pageSub: { fontSize: T.size.secondary, marginTop: 2, fontWeight: '700' },
+  flipX: { transform: [{ scaleX: -1 }] },
+  iconButton: { width: 48, height: 48, borderRadius: 24, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
+  searchBox: { width: 340, height: 48, borderRadius: 24, borderWidth: 2, alignItems: 'center', paddingHorizontal: 18, gap: 10 },
+  searchInput: { flex: 1, fontFamily: SHASHTNA_FONT.sans, fontSize: 16, paddingVertical: 0 },
+  toolbar: { alignItems: 'center', justifyContent: 'space-between', gap: 14, marginBottom: 14 },
+  chipScroll: { flex: 1 },
+  chipRow: { gap: 8, alignItems: 'center', paddingVertical: 6, paddingHorizontal: 4 },
+  sortGroup: { alignItems: 'center', gap: 4, padding: 4, borderRadius: 24, borderWidth: 1 },
+  chip: { height: 38, borderRadius: 19, borderWidth: 2, paddingHorizontal: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
+  chipActive: { experimental_backgroundImage: SHASHTNA_THEME.gradients.brand, borderColor: 'transparent' },
+  chipText: { fontFamily: SHASHTNA_FONT.sans, fontSize: 14, fontWeight: '800' },
+  resetButton: { width: 38, height: 38, borderRadius: 19, borderWidth: 2, borderColor: 'transparent', alignItems: 'center', justifyContent: 'center' },
+  grid: { paddingBottom: 40, paddingTop: 10, paddingHorizontal: 4 },
+  gridRow: { gap: 16, marginBottom: 22 },
+  cardWrap: { width: CARD_W, position: 'relative' },
+  posterFrame: { width: CARD_W, height: CARD_H, borderRadius: 16, overflow: 'hidden', borderWidth: 1 },
+  posterImage: { width: '100%', height: '100%' },
+  posterFallback: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 12, gap: 10, experimental_backgroundImage: 'linear-gradient(160deg, #13203A 0%, #0A101C 100%)' },
+  posterFallbackText: { fontSize: 13, lineHeight: 18, fontWeight: '800', textAlign: 'center' },
+  posterFade: { position: 'absolute', left: 0, right: 0, bottom: 0, height: '45%', experimental_backgroundImage: SHASHTNA_THEME.gradients.posterBottom },
+  episodesBadge: { position: 'absolute', bottom: 8, height: 22, paddingHorizontal: 8, borderRadius: 11, backgroundColor: 'rgba(2,4,9,0.78)', flexDirection: 'row', alignItems: 'center', gap: 4 },
+  badgeLtr: { left: 8 },
+  badgeRtl: { right: 8 },
+  episodesText: { color: '#FFFFFF', fontSize: 12, fontWeight: '900' },
+  favoriteButton: { position: 'absolute', top: 8, width: 32, height: 32, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,.18)', backgroundColor: 'rgba(2,4,9,.72)', alignItems: 'center', justifyContent: 'center', zIndex: 60 },
+  favoriteLtr: { right: 8 },
+  favoriteRtl: { left: 8 },
+  favoriteButtonActive: { backgroundColor: '#FF4D7A', borderColor: 'rgba(255,255,255,.4)' },
+  mediaName: { fontSize: T.size.cardTitle, lineHeight: T.lineHeight.cardTitle, fontWeight: '800', marginTop: 10, paddingHorizontal: 2 },
+  mediaMeta: { fontSize: 12, marginTop: 2, fontWeight: '700', paddingHorizontal: 2 },
+  empty: { minHeight: 360, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 48 },
+  emptyIcon: { width: 68, height: 68, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  emptyTitle: { fontSize: 20, fontWeight: '900', marginTop: 14 },
+  emptyText: { fontSize: 15, textAlign: 'center', marginTop: 6, lineHeight: 24, maxWidth: 560 },
+  pressed: { opacity: 0.84 },
+});

@@ -10,6 +10,7 @@
 import {
   ActivityIndicator,
   BackHandler,
+  useTVEventHandler,
   Dimensions,
   Image,
   Modal,
@@ -40,15 +41,38 @@ import {
 
 import { SHASHTNA_THEME } from '../../design/theme';
 import { useAppPreferences } from '../../design/AppPreferencesContext';
+import AppIcon, { AppIconName } from '../../components/common/AppIcon';
+import SeekBar from '../../features/player/SeekBar';
+import ChannelBanner, { ChannelBannerState } from '../../features/player/ChannelBanner';
+import { describePlaybackError } from '../../features/player/playbackErrors';
+import { createProgressStore, formatClock, ProgressStore } from '../../features/player/progressStore';
+import {
+  ensureContinueWatchingLoaded,
+  getResumePosition,
+  recordProgress,
+} from '../../features/continueWatching/continueWatchingStore';
 
 type PlayerScreenProps = {
   channel: M3UChannel;
-  onBack: () => void;
+  /** Receives the item on screen when leaving (after zapping it differs from `channel`). */
+  onBack: (lastPlayed?: M3UChannel) => void;
   // Kept for compatibility with App.tsx/settings flow.
   preferredQuality?: string;
   autoplay?: boolean;
   subtitles?: boolean;
+  /** Live list the channel was opened from; enables in-player zapping. */
+  liveQueue?: M3UChannel[];
+  /** Open this series episode directly (Continue Watching). */
+  startEpisode?: M3UChannel | null;
+  /** Skip the movie details page and start playback (Continue Watching). */
+  autoStart?: boolean;
 };
+
+/** Coalesces rapid UP/DOWN presses so only the final channel opens a stream. */
+const ZAP_COMMIT_MS = 450;
+const ZAP_BANNER_MS = 3000;
+/** Continue Watching is written at most this often during playback. */
+const RESUME_SAVE_INTERVAL_MS = 10000;
 
 type Track = {
   index: number;
@@ -189,71 +213,6 @@ const {
   height: SCREEN_HEIGHT,
 } =
   Dimensions.get('window');
-
-function formatTime(
-  seconds: number,
-) {
-  if (
-    !Number.isFinite(
-      seconds,
-    ) ||
-    seconds < 0
-  ) {
-    return '00:00';
-  }
-
-  const total =
-    Math.floor(
-      seconds,
-    );
-
-  const hours =
-    Math.floor(
-      total / 3600,
-    );
-
-  const minutes =
-    Math.floor(
-      (total % 3600) /
-        60,
-    );
-
-  const secs =
-    total % 60;
-
-  if (
-    hours > 0
-  ) {
-    return `${hours
-      .toString()
-      .padStart(
-        2,
-        '0',
-      )}:${minutes
-      .toString()
-      .padStart(
-        2,
-        '0',
-      )}:${secs
-      .toString()
-      .padStart(
-        2,
-        '0',
-      )}`;
-  }
-
-  return `${minutes
-    .toString()
-    .padStart(
-      2,
-      '0',
-    )}:${secs
-    .toString()
-    .padStart(
-      2,
-      '0',
-    )}`;
-}
 
 function getContentLabel(
   channel: M3UChannel,
@@ -440,6 +399,23 @@ function uniqueVideoTracks(
   );
 }
 
+const GLYPH_ICONS: Record<string, { name: AppIconName; flip?: boolean }> = {
+  '‹': { name: 'back' },
+  '›': { name: 'back', flip: true },
+  '↻': { name: 'refresh' },
+  '▶': { name: 'play' },
+  '❚❚': { name: 'pause' },
+  '↶': { name: 'rewind' },
+  '↷': { name: 'forward' },
+  'A': { name: 'audio' },
+  'CC': { name: 'subtitle' },
+  'HD': { name: 'quality' },
+  '⛶': { name: 'fullscreen' },
+  '×': { name: 'close' },
+  '▲': { name: 'channelUp' },
+  '▼': { name: 'channelDown' },
+};
+
 function ControlButton({
   icon,
   label,
@@ -447,6 +423,7 @@ function ControlButton({
   disabled = false,
   preferred = false,
   compact = false,
+  large = false,
 }: {
   icon: string;
   label: string;
@@ -454,7 +431,10 @@ function ControlButton({
   disabled?: boolean;
   preferred?: boolean;
   compact?: boolean;
+  /** Bigger touch target (mobile channel switching). */
+  large?: boolean;
 }) {
+  const glyph = GLYPH_ICONS[icon];
   const [
     focused,
     setFocused,
@@ -491,6 +471,8 @@ function ControlButton({
       }
       style={[
         styles.controlButton,
+        large &&
+          styles.controlButtonLarge,
         compact &&
           styles.controlButtonCompact,
         disabled &&
@@ -499,15 +481,21 @@ function ControlButton({
           styles.controlButtonFocused,
       ]}
     >
-      <Text
-        style={[
-          styles.controlIcon,
-          disabled &&
-            styles.controlIconDisabled,
-        ]}
-      >
-        {icon}
-      </Text>
+      {glyph ? (
+        <View style={[styles.controlIconBox, !compact && styles.controlIconGap, glyph.flip && styles.flipX]}>
+          <AppIcon name={glyph.name} size={large ? 26 : 21} color={disabled ? '#94A3B8' : '#FFFFFF'} />
+        </View>
+      ) : (
+        <Text
+          style={[
+            styles.controlIcon,
+            disabled &&
+              styles.controlIconDisabled,
+          ]}
+        >
+          {icon}
+        </Text>
+      )}
 
       {!compact && (
         <Text
@@ -582,10 +570,10 @@ function TrackMenu({
               }
             >
               {isAudio
-                ? 'Ø§Ø®ØªÙŠØ§Ø± Ø§Ù„ØµÙˆØª'
+                ? 'اختيار الصوت'
                 : isSubtitle
-                  ? 'Ø§Ø®ØªÙŠØ§Ø± Ø§Ù„ØªØ±Ø¬Ù…Ø©'
-                  : 'Ø§Ø®ØªÙŠØ§Ø± Ø§Ù„Ø¬ÙˆØ¯Ø©'}
+                  ? 'اختيار الترجمة'
+                  : 'اختيار الجودة'}
             </Text>
 
             <Pressable
@@ -606,7 +594,7 @@ function TrackMenu({
                   styles.closeButtonText
                 }
               >
-                Ã—
+                ×
               </Text>
             </Pressable>
           </View>
@@ -634,8 +622,8 @@ function TrackMenu({
                 }
               >
                 {isAudio
-                  ? 'Ù„Ø§ ØªÙˆØ¬Ø¯ Ù…Ø³Ø§Ø±Ø§Øª ØµÙˆØª Ø¥Ø¶Ø§ÙÙŠØ©'
-                  : 'Ù„Ø§ ØªÙˆØ¬Ø¯ ØªØ±Ø¬Ù…Ø© Ù…ØªØ§Ø­Ø©'}
+                  ? 'لا توجد مسارات صوت إضافية'
+                  : 'لا توجد ترجمة متاحة'}
               </Text>
 
               <Text
@@ -643,7 +631,7 @@ function TrackMenu({
                   styles.emptyTracksDescription
                 }
               >
-                Ù‡Ø°Ø§ ÙŠØ¹ØªÙ…Ø¯ Ø¹Ù„Ù‰ Ø§Ù„Ù…ØµØ¯Ø± Ù†ÙØ³Ù‡ ÙˆÙ‡Ù„ Ø§Ù„Ø¨Ø« ÙŠÙˆÙØ± Ø£ÙƒØ«Ø± Ù…Ù† Ù…Ø³Ø§Ø±.
+                هذا يعتمد على المصدر نفسه وهل البث يوفر أكثر من مسار.
               </Text>
             </View>
           ) : (
@@ -684,7 +672,7 @@ function TrackMenu({
                           styles.trackItemTitle
                         }
                       >
-                        Ø¥ÙŠÙ‚Ø§Ù Ø§Ù„ØªØ±Ø¬Ù…Ø©
+                        إيقاف الترجمة
                       </Text>
 
                       <Text
@@ -692,7 +680,7 @@ function TrackMenu({
                           styles.trackItemSubtitle
                         }
                       >
-                        Ø¨Ø¯ÙˆÙ† ØªØ±Ø¬Ù…Ø©
+                        بدون ترجمة
                       </Text>
                     </View>
 
@@ -703,7 +691,7 @@ function TrackMenu({
                           styles.checkMark
                         }
                       >
-                        âœ“
+                        ✓
                       </Text>
                     )}
                   </Pressable>
@@ -784,7 +772,7 @@ function TrackMenu({
                             styles.checkMark
                           }
                         >
-                          âœ“
+                          ✓
                         </Text>
                       )}
                     </Pressable>
@@ -846,7 +834,7 @@ function QualityMenu({
                 styles.trackPanelTitle
               }
             >
-              Ø§Ø®ØªÙŠØ§Ø± Ø§Ù„Ø¬ÙˆØ¯Ø©
+              اختيار الجودة
             </Text>
 
             <Pressable
@@ -867,7 +855,7 @@ function QualityMenu({
                   styles.closeButtonText
                 }
               >
-                Ã—
+                ×
               </Text>
             </Pressable>
           </View>
@@ -907,7 +895,7 @@ function QualityMenu({
                     styles.trackItemTitle
                   }
                 >
-                  ØªÙ„Ù‚Ø§Ø¦ÙŠ
+                  تلقائي
                 </Text>
 
                 <Text
@@ -915,7 +903,7 @@ function QualityMenu({
                     styles.trackItemSubtitle
                   }
                 >
-                  ÙŠØ®ØªØ§Ø± Ø§Ù„Ù…Ø´ØºÙ„ Ø£ÙØ¶Ù„ Ø¬ÙˆØ¯Ø© Ø­Ø³Ø¨ Ø§Ù„Ø§ØªØµØ§Ù„
+                  يختار المشغل أفضل جودة حسب الاتصال
                 </Text>
               </View>
 
@@ -926,7 +914,7 @@ function QualityMenu({
                     styles.checkMark
                   }
                 >
-                  âœ“
+                  ✓
                 </Text>
               )}
             </Pressable>
@@ -1003,7 +991,7 @@ function QualityMenu({
                         {[
                           track.width &&
                           track.height
-                            ? `${track.width}Ã—${track.height}`
+                            ? `${track.width}×${track.height}`
                             : '',
                           formatBitrate(
                             track.bitrate,
@@ -1013,7 +1001,7 @@ function QualityMenu({
                             Boolean,
                           )
                           .join(
-                            ' â€¢ ',
+                            ' • ',
                           ) ||
                           'Video Track'}
                       </Text>
@@ -1025,7 +1013,7 @@ function QualityMenu({
                           styles.checkMark
                         }
                       >
-                        âœ“
+                        ✓
                       </Text>
                     )}
                   </Pressable>
@@ -1120,7 +1108,7 @@ function SeriesDetailsView({
             err instanceof
               Error
               ? err.message
-              : 'ØªØ¹Ø°Ø± ØªØ­Ù…ÙŠÙ„ ØªÙØ§ØµÙŠÙ„ Ø§Ù„Ù…Ø³Ù„Ø³Ù„.',
+              : 'تعذر تحميل تفاصيل المسلسل.',
           );
         } finally {
           setLoading(
@@ -1219,8 +1207,8 @@ function SeriesDetailsView({
         }
       >
         <ControlButton
-          icon={ar ? 'â€º' : 'â€¹'}
-          label="Ø±Ø¬ÙˆØ¹"
+          icon={ar ? '›' : '‹'}
+          label="رجوع"
           onPress={
             onBack
           }
@@ -1241,7 +1229,7 @@ function SeriesDetailsView({
               styles.seriesTopTitleText
             }
           >
-            ØªÙØ§ØµÙŠÙ„ Ø§Ù„Ù…Ø³Ù„Ø³Ù„
+            تفاصيل المسلسل
           </Text>
         </View>
       </View>
@@ -1316,7 +1304,7 @@ function SeriesDetailsView({
                       styles.seriesPosterFallbackText
                     }
                   >
-                    Ø´
+                    ش
                   </Text>
                 </View>
               )}
@@ -1376,7 +1364,7 @@ function SeriesDetailsView({
                       styles.seriesMetaText
                     }
                   >
-                    â˜… {rating.toFixed(
+                    ★ {rating.toFixed(
                       1,
                     )}
                   </Text>
@@ -1388,7 +1376,7 @@ function SeriesDetailsView({
                       styles.seriesMetaText
                     }
                   >
-                    {seasons.length} Ù…ÙˆØ§Ø³Ù…
+                    {seasons.length} مواسم
                   </Text>
                 ) : null}
               </View>
@@ -1423,7 +1411,7 @@ function SeriesDetailsView({
                     styles.seriesPlotHero
                   }
                 >
-                  Ù„Ø§ ØªÙˆØ¬Ø¯ Ù‚ØµØ© Ù…ØªÙˆÙØ±Ø© Ù…Ù† Ù…ØµØ¯Ø± Ø§Ù„Ø§Ø´ØªØ±Ø§Ùƒ.
+                  لا توجد قصة متوفرة من مصدر الاشتراك.
                 </Text>
               )}
             </View>
@@ -1448,7 +1436,7 @@ function SeriesDetailsView({
                 styles.seriesLoadingText
               }
             >
-              Ø¬Ø§Ø±ÙŠ ØªØ­Ù…ÙŠÙ„ Ø§Ù„Ù…ÙˆØ§Ø³Ù… ÙˆØ§Ù„Ø­Ù„Ù‚Ø§Øª...
+              جاري تحميل المواسم والحلقات...
             </Text>
           </View>
         ) : error ? (
@@ -1462,7 +1450,7 @@ function SeriesDetailsView({
                 styles.seriesErrorTitle
               }
             >
-              ØªØ¹Ø°Ø± ØªØ­Ù…ÙŠÙ„ ØªÙØ§ØµÙŠÙ„ Ø§Ù„Ù…Ø³Ù„Ø³Ù„
+              تعذر تحميل تفاصيل المسلسل
             </Text>
 
             <Text
@@ -1474,8 +1462,8 @@ function SeriesDetailsView({
             </Text>
 
             <ControlButton
-              icon="â†»"
-              label="Ø¥Ø¹Ø§Ø¯Ø© Ø§Ù„Ù…Ø­Ø§ÙˆÙ„Ø©"
+              icon="↻"
+              label="إعادة المحاولة"
               onPress={
                 loadDetails
               }
@@ -1490,7 +1478,7 @@ function SeriesDetailsView({
                     styles.seriesSectionTitle
                   }
                 >
-                  Ø§Ù„Ù…ÙˆØ§Ø³Ù…
+                  المواسم
                 </Text>
 
                 <ScrollView
@@ -1551,7 +1539,7 @@ function SeriesDetailsView({
                             ]}
                           >
                             {season.name ||
-                              `Ø§Ù„Ù…ÙˆØ³Ù… ${seasonNumber}`}
+                              `الموسم ${seasonNumber}`}
                           </Text>
 
                           <Text
@@ -1565,7 +1553,7 @@ function SeriesDetailsView({
                               season.episode_count ||
                                 0,
                             ) || 0}{' '}
-                            Ø­Ù„Ù‚Ø©
+                            حلقة
                           </Text>
                         </Pressable>
                       );
@@ -1585,7 +1573,7 @@ function SeriesDetailsView({
                   styles.seriesSectionTitle
                 }
               >
-                Ø­Ù„Ù‚Ø§Øª Ø§Ù„Ù…ÙˆØ³Ù…{' '}
+                حلقات الموسم{' '}
                 {selectedSeason}
               </Text>
 
@@ -1594,7 +1582,7 @@ function SeriesDetailsView({
                   styles.episodesCount
                 }
               >
-                {episodes.length} Ø­Ù„Ù‚Ø©
+                {episodes.length} حلقة
               </Text>
             </View>
 
@@ -1610,7 +1598,7 @@ function SeriesDetailsView({
                     styles.noEpisodesTitle
                   }
                 >
-                  Ù…Ø§ÙƒÙˆ Ø­Ù„Ù‚Ø§Øª Ù…ØªØ§Ø­Ø©
+                  ماكو حلقات متاحة
                 </Text>
 
                 <Text
@@ -1618,7 +1606,7 @@ function SeriesDetailsView({
                     styles.noEpisodesText
                   }
                 >
-                  Ù‡Ø°Ø§ Ø§Ù„Ù…ÙˆØ³Ù… Ù…Ø§ Ø±Ø¬Ø¹ Ø­Ù„Ù‚Ø§Øª Ù…Ù† Ø³ÙŠØ±ÙØ± Xtream.
+                  هذا الموسم ما رجع حلقات من سيرفر Xtream.
                 </Text>
               </View>
             ) : (
@@ -1674,7 +1662,7 @@ function SeriesDetailsView({
                                 styles.episodeImageFallbackText
                               }
                             >
-                              â–¶
+                              ▶
                             </Text>
                           </View>
                         )}
@@ -1718,10 +1706,10 @@ function SeriesDetailsView({
                             styles.episodeMeta
                           }
                         >
-                          Ø§Ù„Ù…ÙˆØ³Ù…{' '}
+                          الموسم{' '}
                           {episode.seasonNumber ||
                             selectedSeason}{' '}
-                          â€¢ Ø§Ù„Ø­Ù„Ù‚Ø©{' '}
+                          • الحلقة{' '}
                           {episode.episodeNumber ||
                             1}
                         </Text>
@@ -1737,7 +1725,7 @@ function SeriesDetailsView({
                             styles.episodePlayText
                           }
                         >
-                          â–¶
+                          ▶
                         </Text>
                       </View>
                     </Pressable>
@@ -1798,7 +1786,7 @@ function MovieDetailsView({
     setLoading(false);
 
     if (!xtreamInfo && !tmdbInfo) {
-      setError('ØªØ¹Ø°Ø± ØªØ­Ù…ÙŠÙ„ ØªÙØ§ØµÙŠÙ„ Ø§Ù„ÙÙŠÙ„Ù… Ù…Ù† Ø§Ù„Ù…ØµØ¯Ø± Ø§Ù„Ø­Ø§Ù„ÙŠ.');
+      setError('تعذر تحميل تفاصيل الفيلم من المصدر الحالي.');
     }
   }, [channel]);
 
@@ -1856,8 +1844,8 @@ function MovieDetailsView({
     <View style={styles.movieDetailsRoot}>
       <View style={styles.seriesTopBar}>
         <ControlButton
-          icon="â€¹"
-          label="Ø±Ø¬ÙˆØ¹"
+          icon="‹"
+          label="رجوع"
           onPress={onBack}
           preferred
           compact
@@ -1865,7 +1853,7 @@ function MovieDetailsView({
 
         <View style={styles.seriesTopTitle}>
           <Text numberOfLines={1} style={styles.seriesTopTitleText}>
-            ØªÙØ§ØµÙŠÙ„ Ø§Ù„ÙÙŠÙ„Ù…
+            تفاصيل الفيلم
           </Text>
         </View>
       </View>
@@ -1897,7 +1885,7 @@ function MovieDetailsView({
                 />
               ) : (
                 <View style={styles.seriesPosterFallback}>
-                  <Text style={styles.seriesPosterFallbackText}>Ø´</Text>
+                  <Text style={styles.seriesPosterFallbackText}>ش</Text>
                 </View>
               )}
             </View>
@@ -1915,7 +1903,7 @@ function MovieDetailsView({
                 ) : null}
 
                 {rating > 0 ? (
-                  <Text style={styles.seriesMetaText}>â˜… {rating.toFixed(1)}</Text>
+                  <Text style={styles.seriesMetaText}>★ {rating.toFixed(1)}</Text>
                 ) : null}
               </View>
 
@@ -1929,26 +1917,26 @@ function MovieDetailsView({
                 <Text style={styles.seriesPlotHero}>{plot}</Text>
               ) : (
                 <Text style={styles.seriesPlotHero}>
-                  Ù„Ø§ ØªÙˆØ¬Ø¯ Ù‚ØµØ© Ù…ØªÙˆÙØ±Ø© Ù…Ù† Ù…ØµØ¯Ø± Ø§Ù„Ø§Ø´ØªØ±Ø§Ùƒ Ø£Ùˆ TMDB.
+                  لا توجد قصة متوفرة من مصدر الاشتراك أو TMDB.
                 </Text>
               )}
 
               {info?.director ? (
                 <Text style={styles.movieDetailsSecondaryText}>
-                  Ø§Ù„Ù…Ø®Ø±Ø¬: {info.director}
+                  المخرج: {info.director}
                 </Text>
               ) : null}
 
               {info?.cast ? (
                 <Text style={styles.movieDetailsSecondaryText} numberOfLines={2}>
-                  Ø¨Ø·ÙˆÙ„Ø©: {info.cast}
+                  بطولة: {info.cast}
                 </Text>
               ) : null}
 
               <View style={styles.movieDetailsActions}>
                 <ControlButton
-                  icon="â–¶"
-                  label="Ù…Ø´Ø§Ù‡Ø¯Ø© Ø§Ù„Ø¢Ù†"
+                  icon="▶"
+                  label="مشاهدة الآن"
                   onPress={onWatch}
                   preferred
                 />
@@ -1961,14 +1949,14 @@ function MovieDetailsView({
           <View style={styles.seriesLoading}>
             <ActivityIndicator size="large" color={SHASHTNA_THEME.colors.primary} />
             <Text style={styles.seriesLoadingText}>
-              Ø¬Ø§Ø±ÙŠ ØªØ­Ù…ÙŠÙ„ ØªÙØ§ØµÙŠÙ„ Ø§Ù„ÙÙŠÙ„Ù…...
+              جاري تحميل تفاصيل الفيلم...
             </Text>
           </View>
         ) : error ? (
           <View style={styles.seriesErrorCard}>
-            <Text style={styles.seriesErrorTitle}>ØªØ¹Ø°Ø± ØªØ­Ù…ÙŠÙ„ Ø§Ù„ØªÙØ§ØµÙŠÙ„</Text>
+            <Text style={styles.seriesErrorTitle}>تعذر تحميل التفاصيل</Text>
             <Text style={styles.seriesErrorText}>{error}</Text>
-            <ControlButton icon="â†»" label="Ø¥Ø¹Ø§Ø¯Ø© Ø§Ù„Ù…Ø­Ø§ÙˆÙ„Ø©" onPress={loadDetails} />
+            <ControlButton icon="↻" label="إعادة المحاولة" onPress={loadDetails} />
           </View>
         ) : null}
       </ScrollView>
@@ -1979,6 +1967,9 @@ function MovieDetailsView({
 export default function PlayerScreen({
   channel,
   onBack,
+  liveQueue,
+  startEpisode = null,
+  autoStart = false,
 }: PlayerScreenProps) {
   const { language } = useAppPreferences();
   const ar = language === 'ar';
@@ -1987,13 +1978,19 @@ export default function PlayerScreen({
     setActiveEpisode,
   ] =
     useState<M3UChannel | null>(
-      null,
+      startEpisode,
     );
 
   const [
     movieStarted,
     setMovieStarted,
-  ] = useState(false);
+  ] = useState(autoStart);
+
+  // Channel chosen by in-player zapping; null means "the channel we were opened with".
+  const [
+    zappedChannel,
+    setZappedChannel,
+  ] = useState<M3UChannel | null>(null);
 
   const videoRef =
     useRef<VideoRef>(
@@ -2009,6 +2006,7 @@ export default function PlayerScreen({
 
   const playbackChannel =
     activeEpisode ||
+    zappedChannel ||
     channel;
 
   const isSeriesDetails =
@@ -2037,17 +2035,18 @@ export default function PlayerScreen({
   ] =
     useState(0);
 
-  const [
-    currentTime,
-    setCurrentTime,
-  ] =
-    useState(0);
+  // Position/buffer live in an external store so 500 ms progress events
+  // re-render only the SeekBar, not the whole player.
+  const progressStoreRef =
+    useRef<ProgressStore | null>(null);
 
-  const [
-    playableDuration,
-    setPlayableDuration,
-  ] =
-    useState(0);
+  if (!progressStoreRef.current) {
+    progressStoreRef.current =
+      createProgressStore();
+  }
+
+  const progress =
+    progressStoreRef.current;
 
   const [
     loading,
@@ -2152,29 +2151,47 @@ export default function PlayerScreen({
   const isLive =
     duration <= 0;
 
-  const progressRatio =
-    duration > 0
-      ? Math.min(
-          1,
-          Math.max(
-            0,
-            currentTime /
-              duration,
-          ),
-        )
-      : 0;
+  const [
+    errorInfo,
+    setErrorInfo,
+  ] = useState<{ title: string; message: string; technical: string } | null>(null);
 
-  const bufferedRatio =
-    duration > 0
-      ? Math.min(
-          1,
-          Math.max(
-            0,
-            playableDuration /
-              duration,
-          ),
-        )
-      : 0;
+  const [
+    showDiagnostics,
+    setShowDiagnostics,
+  ] = useState(false);
+
+  const [
+    banner,
+    setBanner,
+  ] = useState<ChannelBannerState | null>(null);
+
+  const [
+    resumeNotice,
+    setResumeNotice,
+  ] = useState<string | null>(null);
+
+  const [
+    scrubbing,
+    setScrubbing,
+  ] = useState(false);
+
+  const canZap =
+    channel.contentType === 'live' &&
+    (liveQueue?.length ?? 0) > 1;
+
+  // Refs read by long-lived callbacks (TV key handler, timers, progress).
+  const durationRef = useRef(0);
+  durationRef.current = duration;
+  const playbackChannelRef = useRef(playbackChannel);
+  playbackChannelRef.current = playbackChannel;
+  const resumeParentRef = useRef<M3UChannel | undefined>(undefined);
+  resumeParentRef.current = activeEpisode ? channel : undefined;
+  const lastSaveAtRef = useRef(0);
+  const suppressWakeRef = useRef(false);
+  const zapTargetRef = useRef<number | null>(null);
+  const zapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const clearHideTimer =
     useCallback(
@@ -2201,6 +2218,7 @@ export default function PlayerScreen({
         if (
           paused ||
           menu ||
+          scrubbing ||
           isSeriesDetails ||
           isMovieDetails
         ) {
@@ -2218,6 +2236,7 @@ export default function PlayerScreen({
         clearHideTimer,
         menu,
         paused,
+        scrubbing,
         isMovieDetails,
         isSeriesDetails,
       ],
@@ -2278,14 +2297,15 @@ export default function PlayerScreen({
           return;
         }
 
-        onBack();
+        onBack(zappedChannel || channel);
       },
       [
         activeEpisode,
-        channel.contentType,
+        channel,
         clearHideTimer,
         movieStarted,
         onBack,
+        zappedChannel,
       ],
     );
 
@@ -2322,10 +2342,14 @@ export default function PlayerScreen({
 
   useEffect(() => {
     setActiveEpisode(
-      null,
+      startEpisode,
     );
 
-    setMovieStarted(false);
+    setMovieStarted(autoStart);
+
+    setZappedChannel(null);
+
+    setBanner(null);
 
     setPaused(
       false,
@@ -2335,13 +2359,7 @@ export default function PlayerScreen({
       0,
     );
 
-    setCurrentTime(
-      0,
-    );
-
-    setPlayableDuration(
-      0,
-    );
+    progress.reset();
 
     setLoading(
       true,
@@ -2396,6 +2414,8 @@ export default function PlayerScreen({
           VIDEO_TRACK_TYPE.AUTO,
       },
     );
+    // Reset only when a different item is opened; launch options belong to it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     channel.id,
   ]);
@@ -2424,12 +2444,14 @@ export default function PlayerScreen({
         0,
       );
 
-      setCurrentTime(
-        0,
+      progress.reset();
+
+      setErrorInfo(
+        null,
       );
 
-      setPlayableDuration(
-        0,
+      setShowDiagnostics(
+        false,
       );
 
       setAudioTracks(
@@ -2465,6 +2487,7 @@ export default function PlayerScreen({
   }, [
     playbackChannel.id,
     isSeriesDetails,
+    progress,
   ]);
 
   useEffect(() => {
@@ -2517,7 +2540,7 @@ export default function PlayerScreen({
             duration,
             Math.max(
               0,
-              currentTime +
+              progress.get().currentTime +
                 seconds,
             ),
           );
@@ -2526,9 +2549,9 @@ export default function PlayerScreen({
           target,
         );
 
-        setCurrentTime(
-          target,
-        );
+        progress.set({
+          currentTime: target,
+        });
 
         setEnded(
           false,
@@ -2537,8 +2560,8 @@ export default function PlayerScreen({
         wakeControls();
       },
       [
-        currentTime,
         duration,
+        progress,
         wakeControls,
       ],
     );
@@ -2556,9 +2579,9 @@ export default function PlayerScreen({
           0,
         );
 
-        setCurrentTime(
-          0,
-        );
+        progress.set({
+          currentTime: 0,
+        });
 
         setEnded(
           false,
@@ -2571,6 +2594,7 @@ export default function PlayerScreen({
         wakeControls();
       },
       [
+        progress,
         wakeControls,
       ],
     );
@@ -2615,17 +2639,32 @@ export default function PlayerScreen({
       (
         data: VideoProgressEvent,
       ) => {
-        setCurrentTime(
-          data.currentTime ||
-            0,
-        );
+        const position =
+          data.currentTime || 0;
 
-        setPlayableDuration(
-          data.playableDuration ||
-            0,
-        );
+        progress.set({
+          currentTime: position,
+          playableDuration:
+            data.playableDuration || 0,
+        });
+
+        const now = Date.now();
+
+        if (
+          durationRef.current > 0 &&
+          now - lastSaveAtRef.current >
+            RESUME_SAVE_INTERVAL_MS
+        ) {
+          lastSaveAtRef.current = now;
+          recordProgress(
+            playbackChannelRef.current,
+            position,
+            durationRef.current,
+            resumeParentRef.current,
+          );
+        }
       },
-      [],
+      [progress],
     );
 
   const handleLoad =
@@ -2754,9 +2793,54 @@ export default function PlayerScreen({
           },
         );
 
+        const resumeAt =
+          nextDuration > 0
+            ? getResumePosition(
+                playbackChannelRef.current,
+              )
+            : 0;
+
+        if (
+          resumeAt > 0 &&
+          videoRef.current
+        ) {
+          videoRef.current.seek(
+            resumeAt,
+          );
+
+          progress.set({
+            currentTime: resumeAt,
+          });
+
+          setResumeNotice(
+            formatClock(resumeAt),
+          );
+        }
+
+        if (
+          suppressWakeRef.current
+        ) {
+          // Channel switch: keep the picture clean, just let the banner settle.
+          suppressWakeRef.current =
+            false;
+
+          if (bannerTimerRef.current) {
+            clearTimeout(bannerTimerRef.current);
+          }
+
+          bannerTimerRef.current =
+            setTimeout(
+              () => setBanner(null),
+              ZAP_BANNER_MS,
+            );
+
+          return;
+        }
+
         wakeControls();
       },
       [
+        progress,
         wakeControls,
       ],
     );
@@ -2817,33 +2901,22 @@ export default function PlayerScreen({
       (
         data: VideoErrorEvent,
       ) => {
-        let message =
-          'ØªØ¹Ø°Ø± ØªØ´ØºÙŠÙ„ Ù‡Ø°Ø§ Ø§Ù„Ù…Ø­ØªÙˆÙ‰.';
+        const info =
+          describePlaybackError(
+            data as any,
+            ar,
+          );
 
-        if (
-          data?.error
-        ) {
-          try {
-            const raw =
-              JSON.stringify(
-                data.error,
-              );
+        setErrorInfo(
+          info,
+        );
 
-            if (
-              raw &&
-              raw.length >
-                0
-            ) {
-              message =
-                `ØªØ¹Ø°Ø± ØªØ´ØºÙŠÙ„ Ø§Ù„Ù…Ø­ØªÙˆÙ‰.\n${raw}`;
-            }
-          } catch {
-            // Keep default message.
-          }
-        }
+        setShowDiagnostics(
+          false,
+        );
 
         setError(
-          message,
+          info.message,
         );
 
         setLoading(
@@ -2861,6 +2934,7 @@ export default function PlayerScreen({
         wakeControls();
       },
       [
+        ar,
         wakeControls,
       ],
     );
@@ -2880,6 +2954,13 @@ export default function PlayerScreen({
   const handleEnd =
     useCallback(
       () => {
+        recordProgress(
+          playbackChannelRef.current,
+          durationRef.current,
+          durationRef.current,
+          resumeParentRef.current,
+        );
+
         setEnded(
           true,
         );
@@ -2898,6 +2979,139 @@ export default function PlayerScreen({
         clearHideTimer,
       ],
     );
+
+  useEffect(() => {
+    void ensureContinueWatchingLoaded();
+  }, []);
+
+  // Save the final position when leaving an item (back, episode change, zap).
+  useEffect(() => {
+    const item = playbackChannel;
+    const parent = resumeParentRef.current;
+
+    return () => {
+      const position = progress.get().currentTime;
+
+      if (durationRef.current > 0 && position > 0) {
+        recordProgress(item, position, durationRef.current, parent);
+      }
+    };
+  }, [playbackChannel, progress]);
+
+  useEffect(() => {
+    if (!resumeNotice) return;
+    const timer = setTimeout(() => setResumeNotice(null), 4000);
+    return () => clearTimeout(timer);
+  }, [resumeNotice]);
+
+  useEffect(
+    () => () => {
+      if (zapTimerRef.current) clearTimeout(zapTimerRef.current);
+      if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
+    },
+    [],
+  );
+
+  const zap =
+    useCallback(
+      (delta: 1 | -1) => {
+        const queue = liveQueue || [];
+
+        if (!canZap) {
+          return;
+        }
+
+        const current = zappedChannel || channel;
+        const currentIndex = queue.findIndex(item => item.id === current.id);
+        const from = zapTargetRef.current ?? currentIndex;
+
+        // Opened channel missing from the queue: enter at the matching end.
+        const target =
+          from < 0
+            ? (delta > 0 ? 0 : queue.length - 1)
+            : from + delta;
+
+        if (bannerTimerRef.current) {
+          clearTimeout(bannerTimerRef.current);
+        }
+
+        if (target < 0 || target >= queue.length) {
+          // No wrap-around: stay on the current channel and say why.
+          const edgeIndex = Math.max(0, Math.min(queue.length - 1, from));
+          setBanner({
+            channel: queue[edgeIndex] || current,
+            number: edgeIndex + 1,
+            total: queue.length,
+            pending: false,
+            edge: target < 0 ? 'first' : 'last',
+          });
+          bannerTimerRef.current = setTimeout(() => setBanner(null), ZAP_BANNER_MS);
+          return;
+        }
+
+        zapTargetRef.current = target;
+
+        setBanner({
+          channel: queue[target],
+          number: target + 1,
+          total: queue.length,
+          pending: true,
+        });
+
+        if (zapTimerRef.current) {
+          clearTimeout(zapTimerRef.current);
+        }
+
+        zapTimerRef.current = setTimeout(() => {
+          zapTimerRef.current = null;
+          const index = zapTargetRef.current;
+          zapTargetRef.current = null;
+
+          if (index === null) {
+            return;
+          }
+
+          const next = queue[index];
+
+          suppressWakeRef.current = true;
+          clearHideTimer();
+          setShowControls(false);
+          setMenu(null);
+          setZappedChannel(next.id === channel.id ? null : next);
+          setBanner(value => (value ? { ...value, pending: false } : value));
+          bannerTimerRef.current = setTimeout(() => setBanner(null), ZAP_BANNER_MS * 3);
+        }, ZAP_COMMIT_MS);
+      },
+      [canZap, channel, clearHideTimer, liveQueue, zappedChannel],
+    );
+
+  const showControlsRef = useRef(showControls);
+  showControlsRef.current = showControls;
+  const menuRef = useRef(menu);
+  menuRef.current = menu;
+
+  useTVEventHandler(
+    useCallback(
+      evt => {
+        if (!evt || evt.eventKeyAction === 1 || !canZap || menuRef.current) {
+          return;
+        }
+
+        // Dedicated channel keys always zap (CH+ = next, CH- = previous).
+        if (evt.eventType === 'channelUp' || evt.eventType === 'channelDown') {
+          zap(evt.eventType === 'channelUp' ? 1 : -1);
+          return;
+        }
+
+        // D-pad UP/DOWN zap only while the control panel is hidden; when it is
+        // visible they move focus between controls as usual.
+        if (!showControlsRef.current && (evt.eventType === 'up' || evt.eventType === 'down')) {
+          zap(evt.eventType === 'up' ? -1 : 1);
+        }
+      },
+      [canZap, zap],
+    ),
+  );
 
   if (
     isMovieDetails
@@ -3052,7 +3266,7 @@ export default function PlayerScreen({
                   styles.spinnerText
                 }
               >
-                â—Œ
+                ◌
               </Text>
             </View>
 
@@ -3061,7 +3275,7 @@ export default function PlayerScreen({
                 styles.bufferingText
               }
             >
-              Ø¬Ø§Ø±ÙŠ ØªØ­Ù…ÙŠÙ„ Ø§Ù„Ø¨Ø«...
+              جاري تحميل البث...
             </Text>
           </View>
         )}
@@ -3078,7 +3292,7 @@ export default function PlayerScreen({
             style={
               styles.hiddenControlsTapZone
             }
-            accessibilityLabel="Ø¥Ø¸Ù‡Ø§Ø± Ø¹Ù†Ø§ØµØ± Ø§Ù„ØªØ­ÙƒÙ…"
+            accessibilityLabel="إظهار عناصر التحكم"
           />
         )}
 
@@ -3096,8 +3310,8 @@ export default function PlayerScreen({
                 style={[styles.topBar,{flexDirection: ar ? 'row-reverse' : 'row'}]}
               >
                 <ControlButton
-                  icon={ar ? 'â€º' : 'â€¹'}
-                  label="Ø±Ø¬ÙˆØ¹"
+                  icon={ar ? '›' : '‹'}
+                  label="رجوع"
                   onPress={
                     goBack
                   }
@@ -3180,90 +3394,64 @@ export default function PlayerScreen({
                       styles.progressSection
                     }
                   >
-                    <View
-                      style={
-                        styles.timeRow
-                      }
-                    >
-                      <Text
-                        style={
-                          styles.timeText
-                        }
-                      >
-                        {formatTime(
-                          currentTime,
-                        )}
-                      </Text>
-
-                      <Text
-                        style={
-                          styles.timeText
-                        }
-                      >
-                        {formatTime(
-                          duration,
-                        )}
-                      </Text>
-                    </View>
-
-                    <View
-                      style={
-                        styles.progressTrack
-                      }
-                    >
-                      <View
-                        style={[
-                          styles.bufferedTrack,
-                          {
-                            width: `${bufferedRatio * 100}%`,
-                          },
-                        ]}
-                      />
-
-                      <View
-                        style={[
-                          styles.progressFill,
-                          {
-                            width: `${progressRatio * 100}%`,
-                          },
-                        ]}
-                      />
-
-                      <View
-                        style={[
-                          styles.progressThumb,
-                          {
-                            left: `${progressRatio * 100}%`,
-                          },
-                        ]}
-                      />
-                    </View>
+                    <SeekBar
+                      store={progress}
+                      duration={duration}
+                      accessibilityLabel={ar ? 'شريط التقدم' : 'Playback position'}
+                      onActivity={wakeControls}
+                      onScrubbingChange={setScrubbing}
+                      onSeek={target => {
+                        videoRef.current?.seek(target);
+                        progress.set({ currentTime: target });
+                        setEnded(false);
+                        wakeControls();
+                      }}
+                    />
                   </View>
                 )}
 
                 <View
-                  style={
-                    styles.controlsRow
-                  }
+                  style={[
+                    styles.controlsRow,
+                    { flexDirection: ar ? 'row-reverse' : 'row' },
+                  ]}
                 >
+                  {canZap ? (
+                    <ControlButton
+                      icon="▲"
+                      label={ar ? 'القناة السابقة' : 'Previous channel'}
+                      onPress={() => zap(-1)}
+                      large
+                    />
+                  ) : null}
+
                   <ControlButton
                     icon={
                       paused
-                        ? 'â–¶'
-                        : 'âšâš'
+                        ? '▶'
+                        : '❚❚'
                     }
                     label={
                       paused
-                        ? 'ØªØ´ØºÙŠÙ„'
-                        : 'Ø¥ÙŠÙ‚Ø§Ù'
+                        ? 'تشغيل'
+                        : 'إيقاف'
                     }
                     onPress={
                       togglePlay
                     }
                   />
 
+                  {canZap ? (
+                    <ControlButton
+                      icon="▼"
+                      label={ar ? 'القناة التالية' : 'Next channel'}
+                      onPress={() => zap(1)}
+                      large
+                    />
+                  ) : null}
+
                   <ControlButton
-                    icon="â†¶"
+                    icon="↶"
                     label="-10"
                     onPress={() =>
                       seekBy(
@@ -3276,7 +3464,7 @@ export default function PlayerScreen({
                   />
 
                   <ControlButton
-                    icon="â†·"
+                    icon="↷"
                     label="+10"
                     onPress={() =>
                       seekBy(
@@ -3290,7 +3478,7 @@ export default function PlayerScreen({
 
                   <ControlButton
                     icon="A"
-                    label="Ø§Ù„ØµÙˆØª"
+                    label="الصوت"
                     onPress={() => {
                       setMenu(
                         'audio',
@@ -3306,7 +3494,7 @@ export default function PlayerScreen({
 
                   <ControlButton
                     icon="CC"
-                    label="Ø§Ù„ØªØ±Ø¬Ù…Ø©"
+                    label="الترجمة"
                     onPress={() => {
                       setMenu(
                         'subtitle',
@@ -3322,7 +3510,7 @@ export default function PlayerScreen({
 
                   <ControlButton
                     icon="HD"
-                    label="Ø§Ù„Ø¬ÙˆØ¯Ø©"
+                    label="الجودة"
                     onPress={() => {
                       setMenu(
                         'quality',
@@ -3339,17 +3527,18 @@ export default function PlayerScreen({
                   />
 
                   <ControlButton
-                    icon="â›¶"
-                    label="Ù…Ù„Ø¡ Ø§Ù„Ø´Ø§Ø´Ø©"
-                    onPress={
-                      wakeControls
-                    }
+                    icon="⛶"
+                    label="ملء الشاشة"
+                    onPress={() => {
+                      clearHideTimer();
+                      setShowControls(false);
+                    }}
                     compact
                   />
 
                   <ControlButton
-                    icon="Ã—"
-                    label="Ø®Ø±ÙˆØ¬"
+                    icon="×"
+                    label="خروج"
                     onPress={
                       goBack
                     }
@@ -3361,9 +3550,27 @@ export default function PlayerScreen({
           </>
         )}
 
+      <ChannelBanner
+        state={banner}
+        loading={loading}
+        ar={ar}
+      />
+
+      {resumeNotice && !error ? (
+        <View
+          pointerEvents="none"
+          style={[styles.resumeNotice, ar ? styles.resumeNoticeRtl : styles.resumeNoticeLtr]}
+        >
+          <Text style={styles.resumeNoticeText}>
+            {ar ? `استئناف من ${resumeNotice}` : `Resuming from ${resumeNotice}`}
+          </Text>
+        </View>
+      ) : null}
+
       {loading &&
         !error &&
-        !ended && (
+        !ended &&
+        !banner && (
           <View
             style={
               styles.loadingOverlay
@@ -3379,7 +3586,7 @@ export default function PlayerScreen({
                   styles.loadingLogoText
                 }
               >
-                Ø´
+                ش
               </Text>
             </View>
 
@@ -3388,7 +3595,7 @@ export default function PlayerScreen({
                 styles.loadingTitle
               }
             >
-              Ø¬Ø§Ø±ÙŠ ÙØªØ­ Ø§Ù„Ù…Ø­ØªÙˆÙ‰
+              جاري فتح المحتوى
             </Text>
 
             <Text
@@ -3396,7 +3603,7 @@ export default function PlayerScreen({
                 styles.loadingSubtitle
               }
             >
-              ÙŠØ±Ø¬Ù‰ Ø§Ù„Ø§Ù†ØªØ¸Ø§Ø±...
+              يرجى الانتظار...
             </Text>
           </View>
         )}
@@ -3431,7 +3638,7 @@ export default function PlayerScreen({
                 styles.messageTitle
               }
             >
-              Ø­Ø¯Ø«Øª Ù…Ø´ÙƒÙ„Ø© ÙÙŠ Ø§Ù„ØªØ´ØºÙŠÙ„
+              حدثت مشكلة في التشغيل
             </Text>
 
             <Text
@@ -3442,14 +3649,35 @@ export default function PlayerScreen({
               {error}
             </Text>
 
+            {errorInfo?.technical ? (
+              <Pressable
+                focusable
+                accessibilityRole="button"
+                onPress={() => setShowDiagnostics(value => !value)}
+                style={({ focused }) => [styles.diagnosticsToggle, focused && styles.diagnosticsToggleFocused]}
+              >
+                <Text style={styles.diagnosticsToggleText}>
+                  {showDiagnostics
+                    ? (ar ? 'إخفاء تفاصيل التشخيص' : 'Hide diagnostics')
+                    : (ar ? 'عرض تفاصيل التشخيص' : 'Show diagnostics')}
+                </Text>
+              </Pressable>
+            ) : null}
+
+            {showDiagnostics && errorInfo ? (
+              <Text selectable numberOfLines={6} style={styles.diagnosticsText}>
+                {playbackChannel.contentType.toUpperCase()} · {errorInfo.technical}
+              </Text>
+            ) : null}
+
             <View
               style={
                 styles.messageActions
               }
             >
               <ControlButton
-                icon="â†»"
-                label="Ø¥Ø¹Ø§Ø¯Ø© Ø§Ù„Ù…Ø­Ø§ÙˆÙ„Ø©"
+                icon="↻"
+                label="إعادة المحاولة"
                 onPress={
                   retry
                 }
@@ -3457,8 +3685,8 @@ export default function PlayerScreen({
               />
 
               <ControlButton
-                icon="â€¹"
-                label="Ø±Ø¬ÙˆØ¹"
+                icon="‹"
+                label="رجوع"
                 onPress={
                   goBack
                 }
@@ -3490,7 +3718,7 @@ export default function PlayerScreen({
                     styles.messageIconText
                   }
                 >
-                  âœ“
+                  ✓
                 </Text>
               </View>
 
@@ -3499,7 +3727,7 @@ export default function PlayerScreen({
                   styles.messageTitle
                 }
               >
-                Ø§Ù†ØªÙ‡Ù‰ Ø§Ù„Ù…Ø­ØªÙˆÙ‰
+                انتهى المحتوى
               </Text>
 
               <Text
@@ -3507,7 +3735,7 @@ export default function PlayerScreen({
                   styles.messageDescription
                 }
               >
-                ÙŠÙ…ÙƒÙ†Ùƒ Ø¥Ø¹Ø§Ø¯Ø© ØªØ´ØºÙŠÙ„Ù‡ Ù…Ù† Ø§Ù„Ø¨Ø¯Ø§ÙŠØ© Ø£Ùˆ Ø§Ù„Ø±Ø¬ÙˆØ¹ Ù„Ù„Ù…ÙƒØªØ¨Ø©.
+                يمكنك إعادة تشغيله من البداية أو الرجوع للمكتبة.
               </Text>
 
               <View
@@ -3516,8 +3744,8 @@ export default function PlayerScreen({
                 }
               >
                 <ControlButton
-                  icon="â†»"
-                  label="Ø¥Ø¹Ø§Ø¯Ø© Ø§Ù„ØªØ´ØºÙŠÙ„"
+                  icon="↻"
+                  label="إعادة التشغيل"
                   onPress={
                     replay
                   }
@@ -3525,8 +3753,8 @@ export default function PlayerScreen({
                 />
 
                 <ControlButton
-                  icon="â€¹"
-                  label="Ø±Ø¬ÙˆØ¹"
+                  icon="‹"
+                  label="رجوع"
                   onPress={
                     goBack
                   }
@@ -3834,17 +4062,85 @@ const styles =
       paddingHorizontal: 16,
       paddingVertical: 10,
       borderRadius: 24,
-      flexDirection:
-        'row',
-      alignItems:
-        'center',
-      justifyContent:
-        'center',
-      backgroundColor:
-        'rgba(18, 24, 41, 0.94)',
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: 'rgba(10,18,40,0.82)',
+      borderWidth: 2,
+      borderColor: 'rgba(140,180,255,0.16)',
+    },
+
+    controlButtonLarge: {
+      minWidth: 132,
+      minHeight: 72,
+      borderRadius: 28,
+    },
+
+    controlIconBox: {
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+
+    controlIconGap: {
+      marginRight: 8,
+    },
+
+    flipX: {
+      transform: [{ scaleX: -1 }],
+    },
+
+    resumeNotice: {
+      position: 'absolute',
+      top: 36,
+      zIndex: 70,
+      height: 44,
+      paddingHorizontal: 18,
+      borderRadius: 22,
+      justifyContent: 'center',
+      backgroundColor: 'rgba(6,10,26,0.86)',
       borderWidth: 1,
-      borderColor:
-        'rgba(148, 163, 184, 0.10)',
+      borderColor: SHASHTNA_THEME.colors.borderStrong,
+    },
+
+    resumeNoticeLtr: { left: 40 },
+
+    resumeNoticeRtl: { right: 40 },
+
+    resumeNoticeText: {
+      color: '#FFFFFF',
+      fontSize: 15,
+      fontWeight: '800',
+    },
+
+    diagnosticsToggle: {
+      alignSelf: 'center',
+      marginTop: 12,
+      paddingHorizontal: 16,
+      height: 40,
+      borderRadius: 20,
+      justifyContent: 'center',
+      borderWidth: 2,
+      borderColor: 'transparent',
+    },
+
+    diagnosticsToggleFocused: {
+      borderColor: '#FFFFFF',
+      backgroundColor: 'rgba(255,255,255,0.08)',
+    },
+
+    diagnosticsToggleText: {
+      color: SHASHTNA_THEME.colors.primaryLight,
+      fontSize: 14,
+      fontWeight: '800',
+    },
+
+    diagnosticsText: {
+      marginTop: 8,
+      color: '#94A3B8',
+      fontSize: 12,
+      lineHeight: 18,
+      textAlign: 'left',
+      writingDirection: 'ltr',
     },
 
     controlButtonCompact: {
@@ -3855,22 +4151,14 @@ const styles =
 
     controlButtonFocused: {
       borderColor: '#FFFFFF',
-      backgroundColor: 'rgba(255,255,255,0.92)',
+      borderWidth: 2,
+      backgroundColor: SHASHTNA_THEME.colors.primary,
       transform: [
         {
           scale: 1.05,
         },
       ],
-      shadowColor: '#030810',
-      shadowOpacity:
-        0.7,
-      shadowRadius:
-        18,
-      shadowOffset: {
-        width: 0,
-        height: 0,
-      },
-      elevation: 14,
+      boxShadow: SHASHTNA_THEME.shadows.focusGlow,
     },
 
     controlButtonDisabled: {

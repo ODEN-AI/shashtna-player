@@ -1,2 +1,2 @@
-export const TMDB_ACCESS_TOKEN =
+export const TMDB_ACCESS_TOKEN: string =
 '';
