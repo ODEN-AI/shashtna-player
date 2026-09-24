@@ -1,0 +1,101 @@
+import org.gradle.api.artifacts.repositories.MavenArtifactRepository
+
+def aliyunPublicUrl = 'https://maven.aliyun.com/repository/public'
+def aliyunGoogleUrl = 'https://maven.aliyun.com/repository/google'
+
+def normalizeUrl = { value ->
+    def result = value?.toString() ?: ''
+
+    while (result.endsWith('/')) {
+        result = result.substring(0, result.length() - 1)
+    }
+
+    return result
+}
+
+def configureGoogleRepository = { MavenArtifactRepository repo ->
+
+    repo.setUrl(aliyunGoogleUrl)
+
+    repo.content {
+        /*
+         * Android / Google Android artifacts.
+         */
+        includeGroupByRegex('com\\.android(\\..*)?')
+        includeGroupByRegex('androidx(\\..*)?')
+        includeGroupByRegex('com\\.google\\.android(\\..*)?')
+        includeGroupByRegex('com\\.google\\.gms(\\..*)?')
+        includeGroupByRegex('com\\.google\\.firebase(\\..*)?')
+
+        /*
+         * Google Testing Platform artifacts used by
+         * Android Gradle Plugin dependencies.
+         */
+        includeGroupByRegex('com\\.google\\.testing\\.platform(\\..*)?')
+    }
+}
+
+def configurePublicRepository = { MavenArtifactRepository repo ->
+    repo.setUrl(aliyunPublicUrl)
+}
+
+def configureRepository = { MavenArtifactRepository repo ->
+
+    def originalUrl = normalizeUrl(repo.url)
+
+    if (originalUrl == 'https://dl.google.com/dl/android/maven2') {
+        configureGoogleRepository(repo)
+        return
+    }
+
+    if (originalUrl == 'https://repo.maven.apache.org/maven2' ||
+        originalUrl == 'https://repo1.maven.org/maven2') {
+        configurePublicRepository(repo)
+        return
+    }
+
+    if (originalUrl == aliyunGoogleUrl) {
+        configureGoogleRepository(repo)
+        return
+    }
+
+    if (originalUrl == aliyunPublicUrl) {
+        configurePublicRepository(repo)
+        return
+    }
+}
+
+def attachRepositoryHandler = { repositories ->
+
+    repositories.each { repo ->
+        if (repo instanceof MavenArtifactRepository) {
+            configureRepository(repo)
+        }
+    }
+
+    repositories.whenObjectAdded { repo ->
+        if (repo instanceof MavenArtifactRepository) {
+            configureRepository(repo)
+        }
+    }
+}
+
+gradle.settingsEvaluated { settings ->
+
+    attachRepositoryHandler(settings.pluginManagement.repositories)
+
+    if (settings.metaClass.respondsTo(
+        settings,
+        'getDependencyResolutionManagement'
+    )) {
+        attachRepositoryHandler(
+            settings.dependencyResolutionManagement.repositories
+        )
+    }
+}
+
+gradle.beforeProject { project ->
+
+    attachRepositoryHandler(project.repositories)
+    attachRepositoryHandler(project.buildscript.repositories)
+}

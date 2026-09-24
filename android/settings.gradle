@@ -1,0 +1,51 @@
+pluginManagement {
+    includeBuild("../node_modules/@react-native/gradle-plugin")
+
+    repositories {
+        maven {
+            url = uri(new File(rootDir, "../local-maven"))
+        }
+
+        maven {
+            url = uri("https://maven.aliyun.com/repository/public")
+        }
+
+        maven {
+            url = uri("https://maven.aliyun.com/repository/google")
+        }
+
+        gradlePluginPortal()
+    }
+}
+
+plugins {
+    id("com.facebook.react.settings")
+}
+
+extensions.configure(com.facebook.react.ReactSettingsExtension) { ex ->
+    ex.autolinkLibrariesFromCommand()
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
+
+    repositories {
+        maven {
+            url = uri(new File(rootDir, "../local-maven"))
+        }
+
+        maven {
+            url = uri("https://maven.aliyun.com/repository/public")
+        }
+
+        maven {
+            url = uri("https://maven.aliyun.com/repository/google")
+        }
+    }
+}
+
+rootProject.name = "ShashtnaPlayer"
+
+include(":app")
+
+includeBuild("../node_modules/@react-native/gradle-plugin")

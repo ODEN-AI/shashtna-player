@@ -1,0 +1,59 @@
+# Dependencies
+node_modules/
+
+# Android generated
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+
+# IDE
+.idea/
+.vscode/
+
+# Temporary development files
+temp-hermes-*/
+apk-hermes-check/
+*.tmp
+*.temp
+
+# Build outputs
+*.apk
+*.aab
+
+# Signing / certificates
+*.jks
+*.keystore
+*.p12
+*.pfx
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Machine-specific
+local.properties
+.xcode.env
+
+# Logs
+*.log
+
+# OS files
+Thumbs.db
+.DS_Store
+# Local / historical backups
+*.before-*
+*.backup
+*.bak
+
+# Local Bundler state
+.bundle/
+# React Native / CMake generated files
+.cxx/
+**/.cxx/
+android/app/.cxx/
+
+# Temporary broken/backup source files
+*.broken
+
