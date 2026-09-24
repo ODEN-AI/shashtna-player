@@ -27,6 +27,17 @@ const MAX_ENTRIES = 30;
 export const RESUME_MIN_SECONDS = 20;
 export const FINISHED_RATIO = 0.95;
 
+/**
+ * Stream URLs embed the subscription username/password, so they are never
+ * written here. On resume the app resolves a fresh URL from the current
+ * session (see App.handleResume). Internal detail-page URLs are kept.
+ */
+export function stripStreamUrl<T extends M3UChannel | undefined>(item: T): T {
+  if (!item) return item;
+  const keep = item.url?.startsWith('shashtna-series-detail://');
+  return keep || !item.url ? item : ({ ...item, url: '' } as T);
+}
+
 let entries: ContinueWatchingEntry[] = [];
 let loaded = false;
 let loading: Promise<void> | null = null;
@@ -51,9 +62,14 @@ export function ensureContinueWatchingLoaded(): Promise<void> {
   if (loaded) return Promise.resolve();
   if (!loading) {
     loading = readJsonFile<ContinueWatchingEntry[]>(FILE, []).then(value => {
-      entries = Array.isArray(value) ? value.filter(e => e && e.item && e.key) : [];
+      const valid = Array.isArray(value) ? value.filter(e => e && e.item && e.key) : [];
+      entries = valid.map(e => ({ ...e, item: stripStreamUrl(e.item), parent: stripStreamUrl(e.parent) }));
       loaded = true;
       emit();
+      // Files from earlier versions stored full URLs: rewrite them without.
+      if (valid.some(e => e.item.url && !e.item.url.startsWith('shashtna-series-detail://'))) {
+        scheduleWrite();
+      }
     });
   }
   return loading;
@@ -86,7 +102,7 @@ export function recordProgress(
   }
 
   entries = [
-    { key, item, parent, position, duration, updatedAt: Date.now() },
+    { key, item: stripStreamUrl(item), parent: stripStreamUrl(parent), position, duration, updatedAt: Date.now() },
     ...rest,
   ].slice(0, MAX_ENTRIES);
   emit();

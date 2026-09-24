@@ -1,31 +1,66 @@
 import ReactNativeBlobUtil from 'react-native-blob-util';
 
-const SESSION_FILE =
-  `${ReactNativeBlobUtil.fs.dirs.DocumentDir}/shashtna-connection.json`;
+import { isSecureStoreAvailable, secureGet, secureRemove, secureSet } from './secureStore';
+
+/**
+ * Persists the subscription source (an M3U/Xtream URL that embeds the
+ * username and password).
+ *
+ * Android: encrypted with the Keystore-backed secure store. The legacy
+ * plaintext file from earlier versions is migrated on first load and then
+ * deleted, so existing sessions keep working.
+ * Elsewhere (no native secure store): falls back to the app-private file.
+ */
+const SECURE_KEY = 'connection-source';
+const LEGACY_FILE = `${ReactNativeBlobUtil.fs.dirs.DocumentDir}/shashtna-connection.json`;
 
 type SavedConnection = {
   source: string;
   savedAt: number;
 };
 
+async function readLegacyFile(): Promise<string | null> {
+  try {
+    if (!(await ReactNativeBlobUtil.fs.exists(LEGACY_FILE))) return null;
+    const raw = await ReactNativeBlobUtil.fs.readFile(LEGACY_FILE, 'utf8');
+    const parsed = JSON.parse(raw) as Partial<SavedConnection>;
+    const source = String(parsed.source || '').trim();
+    return source || null;
+  } catch (error) {
+    console.warn('[Shashtna] Failed to read legacy connection file:', error);
+    return null;
+  }
+}
+
+async function deleteLegacyFile(): Promise<void> {
+  try {
+    if (await ReactNativeBlobUtil.fs.exists(LEGACY_FILE)) {
+      await ReactNativeBlobUtil.fs.unlink(LEGACY_FILE);
+    }
+  } catch (error) {
+    console.warn('[Shashtna] Failed to delete legacy connection file:', error);
+  }
+}
+
+async function writeLegacyFile(source: string): Promise<void> {
+  const payload: SavedConnection = { source, savedAt: Date.now() };
+  await ReactNativeBlobUtil.fs.writeFile(LEGACY_FILE, JSON.stringify(payload), 'utf8');
+}
+
 export async function saveConnectionSource(source: string): Promise<void> {
   const value = String(source || '').trim();
-
-  if (!value) {
-    return;
-  }
-
-  const payload: SavedConnection = {
-    source: value,
-    savedAt: Date.now(),
-  };
+  if (!value) return;
 
   try {
-    await ReactNativeBlobUtil.fs.writeFile(
-      SESSION_FILE,
-      JSON.stringify(payload),
-      'utf8',
-    );
+    if (isSecureStoreAvailable()) {
+      const payload: SavedConnection = { source: value, savedAt: Date.now() };
+      if (await secureSet(SECURE_KEY, JSON.stringify(payload))) {
+        // Only remove plaintext once the encrypted copy is committed.
+        await deleteLegacyFile();
+        return;
+      }
+    }
+    await writeLegacyFile(value);
   } catch (error) {
     console.warn('[Shashtna] Failed to save connection:', error);
   }
@@ -33,21 +68,23 @@ export async function saveConnectionSource(source: string): Promise<void> {
 
 export async function loadConnectionSource(): Promise<string | null> {
   try {
-    const exists = await ReactNativeBlobUtil.fs.exists(SESSION_FILE);
+    if (isSecureStoreAvailable()) {
+      const stored = await secureGet(SECURE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored) as Partial<SavedConnection>;
+        const source = String(parsed.source || '').trim();
+        if (source) return source;
+      }
 
-    if (!exists) {
-      return null;
+      // Migration from the plaintext file written by earlier versions.
+      const legacy = await readLegacyFile();
+      if (legacy) {
+        await saveConnectionSource(legacy);
+      }
+      return legacy;
     }
 
-    const raw = await ReactNativeBlobUtil.fs.readFile(
-      SESSION_FILE,
-      'utf8',
-    );
-
-    const parsed = JSON.parse(raw) as Partial<SavedConnection>;
-    const source = String(parsed.source || '').trim();
-
-    return source || null;
+    return await readLegacyFile();
   } catch (error) {
     console.warn('[Shashtna] Failed to load saved connection:', error);
     return null;
@@ -56,12 +93,9 @@ export async function loadConnectionSource(): Promise<string | null> {
 
 export async function clearConnectionSource(): Promise<void> {
   try {
-    const exists = await ReactNativeBlobUtil.fs.exists(SESSION_FILE);
-
-    if (exists) {
-      await ReactNativeBlobUtil.fs.unlink(SESSION_FILE);
-    }
+    await secureRemove(SECURE_KEY);
   } catch (error) {
-    console.warn('[Shashtna] Failed to clear saved connection:', error);
+    console.warn('[Shashtna] Failed to clear secure connection:', error);
   }
+  await deleteLegacyFile();
 }

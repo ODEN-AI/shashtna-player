@@ -42,6 +42,7 @@ import { Advertisement } from './src/features/ads/types';
 import Sidebar from './src/navigation/Sidebar';
 
 import {
+  getSeriesDetails,
   M3UChannel,
   M3UContentType,
   downloadAndParseM3U,
@@ -979,16 +980,37 @@ function AppContent() {
       }
     };
 
-  /** Continue Watching: reopen the exact movie/episode where it stopped. */
-  const handleResume = (entry: ContinueWatchingEntry) => {
+  /**
+   * Continue Watching: reopen the exact movie/episode where it stopped.
+   * Saved entries carry no stream URL (credentials), so a fresh one is
+   * resolved from the current session before playing.
+   */
+  const handleResume = async (entry: ContinueWatchingEntry) => {
     if (entry.parent) {
-      setPlayerOptions({ startEpisode: entry.item });
+      let episode: M3UChannel | null = entry.item.url ? entry.item : null;
+      if (!episode) {
+        try {
+          const details = await getSeriesDetails(entry.parent);
+          episode = details.episodes.find(ep => String(ep.id) === String(entry.item.id)) || null;
+        } catch (error) {
+          console.warn('[Shashtna] Could not resolve episode for resume:', error);
+        }
+      }
+      // Episode gone from the panel: open the series page instead.
+      setPlayerOptions(episode ? { startEpisode: episode } : {});
       setSelectedChannel(entry.parent);
       return;
     }
 
-    setPlayerOptions({ autoStart: entry.item.contentType === 'movie' });
-    setSelectedChannel(entry.item);
+    const fresh =
+      channels.find(c => String(c.id) === String(entry.item.id) && c.contentType === entry.item.contentType) ||
+      (entry.item.url ? entry.item : null);
+    if (!fresh) {
+      console.warn('[Shashtna] Continue Watching item is no longer in this source:', entry.item.name);
+      return;
+    }
+    setPlayerOptions({ autoStart: fresh.contentType === 'movie' });
+    setSelectedChannel(fresh);
   };
 
   const handleAdAction = (ad: Advertisement) => {
