@@ -33,6 +33,9 @@ import AppIcon, { AppIconName } from './src/components/common/AppIcon';
 import { AppPreferencesProvider, useAppPreferences } from './src/design/AppPreferencesContext';
 import { focusStyle, usePalette } from './src/design/palette';
 import AppShell, { ShellBackground } from './src/app/AppShell';
+import { AccentId } from './src/features/appearance/accents';
+import { DEFAULT_APPEARANCE, loadAppearance, saveAppearance } from './src/features/appearance/appearanceStore';
+import { loadFavorites, saveFavorites } from './src/features/favorites/favoritesStore';
 import SplashScreen from './src/app/SplashScreen';
 import { ContinueWatchingEntry } from './src/features/continueWatching/continueWatchingStore';
 import { Advertisement } from './src/features/ads/types';
@@ -606,6 +609,50 @@ function AppContent() {
   const [themeMode, setThemeMode] = useState<ThemeMode>('dark');
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
   const [restoringConnection, setRestoringConnection] = useState(true);
+  const [accent, setAccentId] = useState<AccentId>(DEFAULT_APPEARANCE.accent);
+  const [customAccent, setCustomAccent] = useState<string | null>(null);
+  const appearanceLoaded = useRef(false);
+  const favoritesLoaded = useRef(false);
+
+  const setAccent = useCallback((next: AccentId, customHex?: string | null) => {
+    setAccentId(next);
+    if (next === 'custom') setCustomAccent(customHex ?? null);
+  }, []);
+
+  const preferences = useMemo(
+    () => ({ language, setLanguage, themeMode, setThemeMode, accent, customAccent, setAccent }),
+    [language, themeMode, accent, customAccent, setAccent],
+  );
+
+  // Appearance (theme + accent) and favorites load during the splash and are
+  // saved whenever they change afterwards.
+  useEffect(() => {
+    let alive = true;
+    loadAppearance().then(saved => {
+      if (!alive) return;
+      setThemeMode(saved.themeMode);
+      setAccentId(saved.accent);
+      setCustomAccent(saved.customAccent);
+      appearanceLoaded.current = true;
+    });
+    loadFavorites().then(keys => {
+      if (!alive) return;
+      // Merge in case the user toggled something before the file was read.
+      setFavoriteIds(current => new Set([...keys, ...current]));
+      favoritesLoaded.current = true;
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (appearanceLoaded.current) void saveAppearance({ themeMode, accent, customAccent });
+  }, [themeMode, accent, customAccent]);
+
+  useEffect(() => {
+    if (favoritesLoaded.current) saveFavorites(favoriteIds);
+  }, [favoriteIds]);
   const [playerOptions, setPlayerOptions] = useState<PlayerLaunchOptions>({});
   const [liveInitialGroup, setLiveInitialGroup] = useState<string | null>(null);
   const [lastLiveChannelId, setLastLiveChannelId] = useState<string | null>(null);
@@ -961,12 +1008,7 @@ function AppContent() {
   if (restoringConnection) {
     return (
       <AppPreferencesProvider
-        value={{
-          language,
-          setLanguage,
-          themeMode,
-          setThemeMode,
-        }}
+        value={preferences}
       >
         <View style={[styles.container, styles.restoringConnectionScreen]}>
           <ShellBackground />
@@ -992,12 +1034,7 @@ function AppContent() {
   ) {
     return (
       <AppPreferencesProvider
-        value={{
-          language,
-          setLanguage,
-          themeMode,
-          setThemeMode,
-        }}
+        value={preferences}
       >
         <View
           style={
@@ -1024,12 +1061,7 @@ function AppContent() {
   ) {
     return (
       <AppPreferencesProvider
-        value={{
-          language,
-          setLanguage,
-          themeMode,
-          setThemeMode,
-        }}
+        value={preferences}
       >
         <View
           style={
@@ -1217,12 +1249,7 @@ function AppContent() {
 
   return (
     <AppPreferencesProvider
-      value={{
-        language,
-        setLanguage,
-        themeMode,
-        setThemeMode,
-      }}
+      value={preferences}
     >
       <AppShell
         ar={language === 'ar'}

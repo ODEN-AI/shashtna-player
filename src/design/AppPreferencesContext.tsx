@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useMemo } from 'react';
 
+import { AccentId } from '../features/appearance/accents';
+
 export type AppLanguage = 'ar' | 'en';
 export type ThemeMode = 'dark' | 'light';
 
@@ -8,6 +10,10 @@ export type AppPreferencesValue = {
   setLanguage: (value: AppLanguage) => void;
   themeMode: ThemeMode;
   setThemeMode: (value: ThemeMode) => void;
+  accent: AccentId;
+  customAccent: string | null;
+  /** Pass `customHex` together with 'custom'. */
+  setAccent: (accent: AccentId, customHex?: string | null) => void;
 };
 
 const AppPreferencesContext = createContext<AppPreferencesValue | null>(null);
@@ -16,9 +22,10 @@ export function AppPreferencesProvider({
   value,
   children,
 }: React.PropsWithChildren<{ value: AppPreferencesValue }>) {
+  const { language, setLanguage, themeMode, setThemeMode, accent, customAccent, setAccent } = value;
   const memoValue = useMemo(
-    () => value,
-    [value.language, value.themeMode, value.setLanguage, value.setThemeMode],
+    () => ({ language, setLanguage, themeMode, setThemeMode, accent, customAccent, setAccent }),
+    [language, setLanguage, themeMode, setThemeMode, accent, customAccent, setAccent],
   );
 
   return (

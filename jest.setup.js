@@ -1,19 +1,33 @@
 /* Native modules are unavailable under Jest; provide inert stand-ins. */
 
-jest.mock('react-native-blob-util', () => ({
-  __esModule: true,
-  default: {
-    fs: {
-      dirs: { DocumentDir: '/tmp' },
-      exists: jest.fn(async () => false),
-      readFile: jest.fn(async () => ''),
-      writeFile: jest.fn(async () => undefined),
-      unlink: jest.fn(async () => undefined),
-    },
-    config: jest.fn(() => ({ fetch: jest.fn() })),
-    fetch: jest.fn(),
-  },
-}));
+jest.mock('react-native-blob-util', () => {
+  // In-memory file system so persistence code can be exercised in tests.
+  const files = new Map();
+  const fs = {
+    __files: files,
+    dirs: { DocumentDir: '/docs' },
+    exists: jest.fn(async path => files.has(path)),
+    readFile: jest.fn(async path => {
+      if (!files.has(path)) throw new Error(`ENOENT ${path}`);
+      return files.get(path);
+    }),
+    writeFile: jest.fn(async (path, data) => {
+      files.set(path, data);
+    }),
+    unlink: jest.fn(async path => {
+      files.delete(path);
+    }),
+    mv: jest.fn(async (from, to) => {
+      files.set(to, files.get(from));
+      files.delete(from);
+      return true;
+    }),
+  };
+  return {
+    __esModule: true,
+    default: { fs, config: jest.fn(() => ({ fetch: jest.fn() })), fetch: jest.fn() },
+  };
+});
 
 jest.mock('react-native-video', () => {
   const React = require('react');
