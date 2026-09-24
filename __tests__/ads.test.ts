@@ -22,14 +22,14 @@ const remotePayload = {
   ],
 };
 
-const originalFetch = global.fetch;
+const originalFetch = globalThis.fetch;
 afterEach(() => {
-  global.fetch = originalFetch;
+  globalThis.fetch = originalFetch;
 });
 beforeEach(() => files.clear());
 
 test('remote list is parsed, prioritised, validated and cached', async () => {
-  global.fetch = jest.fn(async () => ({ ok: true, json: async () => remotePayload })) as any;
+  globalThis.fetch = jest.fn(async () => ({ ok: true, json: async () => remotePayload })) as any;
   const ads = await new RemoteAdvertisementRepository('https://example.test/ads.json', local).list();
 
   expect(ads.map(ad => ad.id)).toEqual(['a', 'b', 'x']);
@@ -40,10 +40,10 @@ test('remote list is parsed, prioritised, validated and cached', async () => {
 });
 
 test('offline: falls back to the cached list', async () => {
-  global.fetch = jest.fn(async () => ({ ok: true, json: async () => remotePayload })) as any;
+  globalThis.fetch = jest.fn(async () => ({ ok: true, json: async () => remotePayload })) as any;
   await new RemoteAdvertisementRepository('https://example.test/ads.json', local).list();
 
-  global.fetch = jest.fn(async () => {
+  globalThis.fetch = jest.fn(async () => {
     throw new Error('Network request failed');
   }) as any;
   const ads = await new RemoteAdvertisementRepository('https://example.test/ads.json', local).list();
@@ -51,7 +51,7 @@ test('offline: falls back to the cached list', async () => {
 });
 
 test('offline without cache: falls back to bundled ads', async () => {
-  global.fetch = jest.fn(async () => ({ ok: false, status: 503, json: async () => ({}) })) as any;
+  globalThis.fetch = jest.fn(async () => ({ ok: false, status: 503, json: async () => ({}) })) as any;
   const ads = await new RemoteAdvertisementRepository('https://example.test/ads.json', local).list();
   expect(ads.map(ad => ad.id)).toEqual(['local']);
 });
