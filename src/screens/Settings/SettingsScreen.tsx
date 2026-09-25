@@ -140,7 +140,7 @@ export default function SettingsScreen({
           <Text style={[styles.sectionTitle, { color: palette.text }]}>{ar ? 'المصدر' : 'Source'}</Text>
           <Pressable focusable onPress={onChangeSource} style={({focused})=>[styles.actionRow,{borderColor:palette.border,backgroundColor:palette.surface},focused&&styles.focus]}>
             <View style={[styles.iconBadge,{backgroundColor:palette.primarySoft,borderColor:palette.border}]}><AppIcon name="source" size={17} color={palette.primary}/></View>
-            <View style={{flex:1}}><Text style={[styles.actionTitle,{color:palette.text}]}>{ar?'تغيير المصدر':'Change source'}</Text><Text style={[styles.actionSub,{color:palette.muted}]}>{ar?'إضافة قائمة M3U أو بيانات Xtream جديدة':'Add a new M3U playlist or Xtream source'}</Text></View>
+            <View style={{flex:1}}><Text style={[styles.actionTitle,{color:palette.text}]}>{ar?'تغيير المصدر':'Change source'}</Text><Text style={[styles.actionSub,{color:palette.muted}]}>{ar?'تسجيل الدخول باشتراك IPTV آخر':'Sign in with another IPTV subscription'}</Text></View>
             <AppIcon name="chevron" size={14} color={palette.primary}/>
           </Pressable>
         </View>

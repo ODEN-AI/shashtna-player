@@ -18,14 +18,11 @@ import { useDeviceClass } from '../../design/device';
 import { focusStyle, Palette, usePalette } from '../../design/palette';
 import { SHASHTNA_FONT, SHASHTNA_THEME } from '../../design/theme';
 import { buildXtreamM3UUrl, downloadAndParseM3U, M3UChannel } from '../../lib/m3u';
-import { getTmdbMetadata, tmdbImageUrl } from '../../lib/tmdb';
 import { describeConnectionError, ValidationError } from './connectionErrors';
 
 type Props = {
   onConnected: (channels: M3UChannel[], source: string) => void;
 };
-
-type Mode = 'xtream' | 'm3u';
 
 async function checkNetworkConnection(): Promise<boolean> {
   const endpoints = [
@@ -50,34 +47,30 @@ async function checkNetworkConnection(): Promise<boolean> {
   return false;
 }
 
-/** Artwork for the brand side (only shown when TMDB is configured). */
-const POSTER_SAMPLES: Array<{ name: string; type: 'movie' | 'series' }> = [
-  { name: 'Dune: Part Two', type: 'movie' },
-  { name: 'House of the Dragon', type: 'series' },
-  { name: 'The Last of Us', type: 'series' },
-];
+/** Brand statement shown under the name. Arabic wording is fixed by the brand. */
+const TAGLINE = { ar: 'كل ما تحب، على شاشة واحدة.', en: 'Everything you love, on one screen.' };
 
 /**
  * Sign-in / connection screen.
  *
- * Presentation rebuilt; the connection flow is unchanged: Xtream credentials
- * are turned into the player's M3U URL by buildXtreamM3UUrl and loaded with
- * downloadAndParseM3U. "M3U link" mode passes a playlist URL to the same
- * loader (the same path used when restoring a saved source).
+ * One connection type is offered, shown to users as "IPTV". Internally it is
+ * the unchanged Xtream flow: the credentials become the player's M3U URL via
+ * buildXtreamM3UUrl and are loaded with downloadAndParseM3U (the same loader
+ * App uses to restore a saved source).
  */
 export default function ConnectionScreen({ onConnected }: Props) {
   const { language, setLanguage } = useAppPreferences();
   const ar = language === 'ar';
   const palette = usePalette();
+  const dark = palette.mode === 'dark';
   const device = useDeviceClass();
   const compact = device === 'phone';
   const rowDirection = ar ? 'row-reverse' : 'row';
+  const align = ar ? 'right' : 'left';
 
-  const [mode, setMode] = useState<Mode>('xtream');
   const [server, setServer] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [playlistUrl, setPlaylistUrl] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
   const [loading, setLoading] = useState(false);
@@ -87,7 +80,6 @@ export default function ConnectionScreen({ onConnected }: Props) {
   const [showTechnical, setShowTechnical] = useState(false);
 
   const [networkConnected, setNetworkConnected] = useState<boolean | null>(null);
-  const [posters, setPosters] = useState<string[]>([]);
 
   useEffect(() => {
     let alive = true;
@@ -103,24 +95,6 @@ export default function ConnectionScreen({ onConnected }: Props) {
     };
   }, []);
 
-  useEffect(() => {
-    let alive = true;
-    Promise.all(
-      POSTER_SAMPLES.map(async sample => {
-        const channel = { id: `sample-${sample.name}`, name: sample.name, url: '', logo: '', group: '', contentType: sample.type } as M3UChannel;
-        const metadata = await getTmdbMetadata(channel, sample.type);
-        return tmdbImageUrl(metadata?.posterPath, 'w342') || '';
-      }),
-    )
-      .then(images => {
-        if (alive) setPosters(images.filter(Boolean));
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, []);
-
   const connect = async () => {
     try {
       setLoading(true);
@@ -129,25 +103,14 @@ export default function ConnectionScreen({ onConnected }: Props) {
       setProgress(0);
       setCount(0);
 
-      let source: string;
-      if (mode === 'xtream') {
-        const cleanServer = server.trim();
-        const cleanUsername = username.trim();
-        if (!cleanServer || !cleanUsername || !password) {
-          throw new ValidationError(
-            ar ? 'أكمل بيانات اشتراكك: السيرفر، اسم المستخدم، وكلمة المرور.' : 'Enter your server, username and password.',
-          );
-        }
-        source = buildXtreamM3UUrl(cleanServer, cleanUsername, password);
-      } else {
-        const url = playlistUrl.trim();
-        if (!/^https?:\/\//i.test(url)) {
-          throw new ValidationError(
-            ar ? 'أدخل رابط قائمة M3U كامل يبدأ بـ http:// أو https://' : 'Enter a full M3U playlist link starting with http:// or https://',
-          );
-        }
-        source = url;
+      const cleanServer = server.trim();
+      const cleanUsername = username.trim();
+      if (!cleanServer || !cleanUsername || !password) {
+        throw new ValidationError(
+          ar ? 'أكمل بيانات اشتراكك: السيرفر، اسم المستخدم، وكلمة المرور.' : 'Enter your server, username and password.',
+        );
       }
+      const source = buildXtreamM3UUrl(cleanServer, cleanUsername, password);
 
       const channels = await downloadAndParseM3U(
         source,
@@ -178,135 +141,128 @@ export default function ConnectionScreen({ onConnected }: Props) {
         ? ar ? 'متصل بالإنترنت' : 'Online'
         : ar ? 'لا يوجد اتصال' : 'Offline';
 
-  const presentation = (
-    <View style={[styles.presentation, compact && styles.presentationCompact, { alignItems: ar ? 'flex-end' : 'flex-start' }]}>
-      <View style={[styles.brandRow, { flexDirection: rowDirection }]}>
-        <Image source={BRAND_ASSETS.logo} style={[styles.logo, compact && styles.logoCompact]} />
-        <View style={{ alignItems: ar ? 'flex-end' : 'flex-start' }}>
-          <Text style={[styles.brandName, { color: palette.text }]}>{BRAND.nameInside}</Text>
-          <Text style={[styles.brandTag, { color: palette.accent.light }]}>{ar ? 'منصة ترفيهك على شاشة واحدة' : 'Your entertainment, one screen'}</Text>
-        </View>
+  const brand = (
+    <View style={[styles.brand, compact && styles.brandCompact, { alignItems: compact ? 'center' : ar ? 'flex-end' : 'flex-start' }]}>
+      <View style={[styles.iconStage, compact && styles.iconStageCompact]}>
+        {/* A soft pool of light behind the icon; no frame or card around the artwork itself. */}
+        {dark ? <View pointerEvents="none" style={[styles.halo, compact && styles.haloCompact]} /> : null}
+        <Image source={BRAND_ASSETS.logo} style={[styles.icon, compact && styles.iconCompact]} resizeMode="contain" />
       </View>
+
+      <Text style={[styles.wordmark, { color: palette.muted }]}>{BRAND.nameLatin.toUpperCase()}</Text>
+
+      <Text
+        style={[
+          styles.tagline,
+          !ar && styles.taglineLatin,
+          compact && styles.taglineCompact,
+          { color: palette.text, textAlign: compact ? 'center' : align, writingDirection: ar ? 'rtl' : 'ltr' },
+        ]}
+      >
+        {/* Break after the comma so the statement sits on two balanced lines. */}
+        {(ar ? TAGLINE.ar : TAGLINE.en).replace(/([،,]) /, '$1\n')}
+      </Text>
 
       {!compact ? (
         <>
-          <Text style={[styles.headline, { color: palette.text, textAlign: ar ? 'right' : 'left' }]}>
-            {ar ? 'كل محتواك\nبمكان واحد' : 'Everything you watch,\nin one place'}
-          </Text>
-          <Text style={[styles.body, { color: palette.secondary, textAlign: ar ? 'right' : 'left' }]}>
-            {ar
-              ? 'قنوات مباشرة وأفلام ومسلسلات بتجربة واضحة وسريعة على التلفزيون والموبايل.'
-              : 'Live channels, movies and series in a clear, fast experience on TV and mobile.'}
-          </Text>
+          <View style={[styles.rule, { experimental_backgroundImage: palette.accent.gradient }]} />
           <View style={[styles.features, { flexDirection: rowDirection }]}>
             <Feature icon="live" label={ar ? 'بث مباشر' : 'Live TV'} palette={palette} />
+            <View style={[styles.featureDot, { backgroundColor: palette.muted }]} />
             <Feature icon="movies" label={ar ? 'أفلام' : 'Movies'} palette={palette} />
+            <View style={[styles.featureDot, { backgroundColor: palette.muted }]} />
             <Feature icon="series" label={ar ? 'مسلسلات' : 'Series'} palette={palette} />
           </View>
-          {posters.length >= 3 ? (
-            <View style={[styles.posterFan, { flexDirection: rowDirection }]} pointerEvents="none">
-              {posters.slice(0, 3).map((uri, i) => (
-                <Image
-                  key={uri}
-                  source={{ uri }}
-                  style={[styles.fanPoster, { transform: [{ rotate: `${(i - 1) * (ar ? -5 : 5)}deg` }], zIndex: i === 1 ? 2 : 1 }]}
-                />
-              ))}
-            </View>
-          ) : null}
         </>
       ) : null}
     </View>
   );
 
   const form = (
-    <View style={[styles.card, compact && styles.cardCompact, { borderColor: palette.glassBorder, experimental_backgroundImage: palette.glass }]}>
+    <View
+      style={[
+        styles.card,
+        compact && styles.cardCompact,
+        { borderColor: palette.glassBorder, experimental_backgroundImage: palette.glass },
+        !dark && styles.cardLight,
+      ]}
+    >
+      {/* Hairline of light along the top edge gives the glass its depth. */}
+      <View pointerEvents="none" style={[styles.cardSheen, !dark && styles.cardSheenLight]} />
+
       <View style={[styles.cardTop, { flexDirection: rowDirection }]}>
-        <View style={[styles.status, { flexDirection: rowDirection, borderColor: palette.glassBorder }]}>
-          <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
-          <Text style={[styles.statusText, { color: palette.secondary }]}>{statusText}</Text>
+        {/* The only connection type. A label, not a tab: there is nothing to switch to. */}
+        <View style={[styles.typeBadge, { flexDirection: rowDirection, backgroundColor: palette.accent.soft, borderColor: palette.accent.medium }]}>
+          <AppIcon name="live" size={14} color={dark ? palette.accent.light : palette.accent.deep} />
+          <Text style={[styles.typeBadgeText, { color: dark ? palette.accent.light : palette.accent.deep }]}>IPTV</Text>
         </View>
-        <Pressable
-          focusable
-          accessibilityRole="button"
-          accessibilityLabel={ar ? 'Switch to English' : 'التبديل إلى العربية'}
-          onPress={() => setLanguage(ar ? 'en' : 'ar')}
-          style={({ focused, pressed }) => [
-            styles.langToggle,
-            { flexDirection: rowDirection, borderColor: palette.glassBorder },
-            focused && focusStyle(palette, SHASHTNA_THEME.focus.buttonScale),
-            pressed && styles.pressed,
-          ]}
-        >
-          <AppIcon name="language" size={16} color={palette.accent.light} />
-          <Text style={[styles.langText, { color: palette.text }]}>{ar ? 'English' : 'العربية'}</Text>
-        </Pressable>
+        <View style={[styles.cardTopEnd, { flexDirection: rowDirection }]}>
+          <View style={[styles.status, { flexDirection: rowDirection }]}>
+            <View style={[styles.statusDot, { backgroundColor: statusColor, boxShadow: `0px 0px 8px ${statusColor}` }]} />
+            <Text style={[styles.statusText, { color: palette.muted }]}>{statusText}</Text>
+          </View>
+          <Pressable
+            focusable
+            accessibilityRole="button"
+            accessibilityLabel={ar ? 'Switch to English' : 'التبديل إلى العربية'}
+            onPress={() => setLanguage(ar ? 'en' : 'ar')}
+            style={({ focused, pressed }) => [
+              styles.langToggle,
+              { flexDirection: rowDirection, borderColor: palette.glassBorder },
+              focused && focusStyle(palette, SHASHTNA_THEME.focus.buttonScale),
+              pressed && styles.pressed,
+            ]}
+          >
+            <AppIcon name="language" size={15} color={palette.secondary} />
+            <Text style={[styles.langText, { color: palette.secondary }]}>{ar ? 'English' : 'العربية'}</Text>
+          </Pressable>
+        </View>
       </View>
 
-      <Text style={[styles.cardTitle, { color: palette.text, textAlign: ar ? 'right' : 'left' }]}>
-        {ar ? 'تسجيل الدخول' : 'Sign in'}
-      </Text>
-      <Text style={[styles.cardSub, { color: palette.muted, textAlign: ar ? 'right' : 'left' }]}>
-        {ar ? 'أدخل بيانات اشتراكك وابدأ المشاهدة فوراً.' : 'Enter your subscription details to start watching.'}
-      </Text>
-
-      <View style={[styles.segment, { flexDirection: rowDirection, borderColor: palette.glassBorder }]}>
-        <SegmentButton label="Xtream" active={mode === 'xtream'} onPress={() => setMode('xtream')} palette={palette} />
-        <SegmentButton label={ar ? 'رابط M3U' : 'M3U link'} active={mode === 'm3u'} onPress={() => setMode('m3u')} palette={palette} />
+      <View style={styles.heading}>
+        <Text style={[styles.cardTitle, { color: palette.text, textAlign: align }]}>{ar ? 'تسجيل الدخول' : 'Sign in'}</Text>
+        <Text style={[styles.cardSub, { color: palette.muted, textAlign: align }]}>
+          {ar ? 'أدخل بيانات اشتراكك وابدأ المشاهدة فوراً.' : 'Enter your subscription details to start watching.'}
+        </Text>
       </View>
 
-      {mode === 'xtream' ? (
-        <>
-          <Field
-            label={ar ? 'رابط السيرفر' : 'Server URL'}
-            icon="link"
-            value={server}
-            onChangeText={setServer}
-            placeholder="http://server:port"
-            palette={palette}
-            ar={ar}
-            ltrValue
-            keyboardType="url"
-            preferred
-          />
-          <Field label={ar ? 'اسم المستخدم' : 'Username'} icon="user" value={username} onChangeText={setUsername} placeholder={ar ? 'اسم المستخدم' : 'Username'} palette={palette} ar={ar} ltrValue />
-          <Field
-            label={ar ? 'كلمة المرور' : 'Password'}
-            icon="settings"
-            value={password}
-            onChangeText={setPassword}
-            placeholder={ar ? 'كلمة المرور' : 'Password'}
-            palette={palette}
-            ar={ar}
-            ltrValue
-            secure={!showPassword}
-            accessory={
-              <Pressable
-                focusable
-                accessibilityRole="button"
-                accessibilityLabel={showPassword ? (ar ? 'إخفاء كلمة المرور' : 'Hide password') : ar ? 'إظهار كلمة المرور' : 'Show password'}
-                onPress={() => setShowPassword(v => !v)}
-                style={({ focused }) => [styles.eye, focused && { backgroundColor: palette.accent.soft, borderColor: palette.focus }]}
-              >
-                <AppIcon name="eye" size={18} color={showPassword ? palette.accent.light : palette.muted} />
-              </Pressable>
-            }
-          />
-        </>
-      ) : (
+      <View style={styles.fields}>
         <Field
-          label={ar ? 'رابط قائمة M3U' : 'M3U playlist URL'}
+          label={ar ? 'رابط السيرفر' : 'Server URL'}
           icon="link"
-          value={playlistUrl}
-          onChangeText={setPlaylistUrl}
-          placeholder="https://example.com/playlist.m3u"
+          value={server}
+          onChangeText={setServer}
+          placeholder="http://server:port"
           palette={palette}
           ar={ar}
           ltrValue
           keyboardType="url"
           preferred
         />
-      )}
+        <Field label={ar ? 'اسم المستخدم' : 'Username'} icon="user" value={username} onChangeText={setUsername} placeholder={ar ? 'أدخل اسم المستخدم' : 'Enter your username'} palette={palette} ar={ar} ltrValue />
+        <Field
+          label={ar ? 'كلمة المرور' : 'Password'}
+          icon="settings"
+          value={password}
+          onChangeText={setPassword}
+          placeholder={ar ? 'أدخل كلمة المرور' : 'Enter your password'}
+          palette={palette}
+          ar={ar}
+          ltrValue
+          secure={!showPassword}
+          accessory={
+            <Pressable
+              focusable
+              accessibilityRole="button"
+              accessibilityLabel={showPassword ? (ar ? 'إخفاء كلمة المرور' : 'Hide password') : ar ? 'إظهار كلمة المرور' : 'Show password'}
+              onPress={() => setShowPassword(v => !v)}
+              style={({ focused }) => [styles.eye, focused && { backgroundColor: palette.accent.soft, borderColor: palette.focus }]}
+            >
+              <AppIcon name="eye" size={18} color={showPassword ? palette.accent.light : palette.muted} />
+            </Pressable>
+          }
+        />
+      </View>
 
       <Pressable
         focusable
@@ -315,16 +271,25 @@ export default function ConnectionScreen({ onConnected }: Props) {
         onPress={connect}
         style={({ focused, pressed }) => [
           styles.connect,
-          { flexDirection: rowDirection, experimental_backgroundImage: palette.accent.gradient, boxShadow: palette.accent.buttonShadow },
+          {
+            flexDirection: rowDirection,
+            experimental_backgroundImage: palette.accent.gradient,
+            boxShadow: `${palette.accent.buttonShadow}, inset 0px 1px 0px rgba(255,255,255,0.22)`,
+          },
           loading && styles.connectLoading,
           focused && focusStyle(palette, SHASHTNA_THEME.focus.buttonScale),
           pressed && styles.pressed,
         ]}
       >
-        {loading ? <ActivityIndicator color="#FFFFFF" /> : <AppIcon name="play" size={18} color="#FFFFFF" />}
+        {loading ? <ActivityIndicator color="#FFFFFF" /> : null}
         <Text style={styles.connectText}>
-          {loading ? (ar ? 'جاري تحميل المحتوى...' : 'Loading content...') : ar ? 'دخول' : 'Sign in'}
+          {loading ? (ar ? 'جاري تحميل المحتوى...' : 'Loading content...') : ar ? 'تسجيل الدخول' : 'Sign in'}
         </Text>
+        {!loading ? (
+          <View style={ar ? styles.flipX : undefined}>
+            <AppIcon name="arrow" size={18} color="#FFFFFF" />
+          </View>
+        ) : null}
       </Pressable>
 
       {loading ? (
@@ -332,7 +297,7 @@ export default function ConnectionScreen({ onConnected }: Props) {
           <View style={[styles.progressTrack, { backgroundColor: palette.surfaceHover }]}>
             <View style={[styles.progressFill, { width: `${Math.max(4, Math.min(100, progress))}%`, backgroundColor: palette.accent.bright }]} />
           </View>
-          <Text style={[styles.progressText, { color: palette.muted, textAlign: ar ? 'right' : 'left' }]}>
+          <Text style={[styles.progressText, { color: palette.muted, textAlign: align }]}>
             {ar ? `تم تجهيز ${count.toLocaleString('ar-IQ')} عنصر` : `${count.toLocaleString('en-US')} items ready`}
           </Text>
         </View>
@@ -342,11 +307,11 @@ export default function ConnectionScreen({ onConnected }: Props) {
         <View style={[styles.error, { flexDirection: rowDirection }]}>
           <AppIcon name="info" size={18} color={SHASHTNA_THEME.colors.danger} />
           <View style={styles.errorCopy}>
-            <Text style={[styles.errorTitle, { textAlign: ar ? 'right' : 'left' }]}>{ar ? 'تعذر تسجيل الدخول' : 'Sign-in failed'}</Text>
-            <Text style={[styles.errorBody, { color: palette.secondary, textAlign: ar ? 'right' : 'left' }]}>{error.message}</Text>
+            <Text style={[styles.errorTitle, { textAlign: align }]}>{ar ? 'تعذر تسجيل الدخول' : 'Sign-in failed'}</Text>
+            <Text style={[styles.errorBody, { color: palette.secondary, textAlign: align }]}>{error.message}</Text>
             {error.technical ? (
               <Pressable focusable onPress={() => setShowTechnical(v => !v)} style={({ focused }) => [styles.techToggle, focused && { borderColor: palette.focus }]}>
-                <Text style={[styles.techToggleText, { color: palette.accent.light, textAlign: ar ? 'right' : 'left' }]}>
+                <Text style={[styles.techToggleText, { color: palette.accent.light, textAlign: align }]}>
                   {showTechnical ? (ar ? 'إخفاء التفاصيل' : 'Hide details') : ar ? 'تفاصيل التشخيص' : 'Diagnostics'}
                 </Text>
               </Pressable>
@@ -356,18 +321,29 @@ export default function ConnectionScreen({ onConnected }: Props) {
         </View>
       ) : null}
 
-      <Text style={[styles.note, { color: palette.muted, textAlign: ar ? 'right' : 'left' }]}>
-        {ar ? 'تحتاج اشتراكاً فعّالاً من مزود الخدمة. بياناتك تبقى على جهازك.' : 'An active subscription is required. Your details stay on this device.'}
-      </Text>
+      <View style={[styles.footer, { flexDirection: rowDirection, borderTopColor: palette.glassBorder }]}>
+        <AppIcon name="check" size={14} color={palette.muted} />
+        <Text style={[styles.note, { color: palette.muted, textAlign: align }]}>
+          {ar ? 'تحتاج اشتراكاً فعّالاً من مزود الخدمة. بياناتك تبقى على جهازك.' : 'An active subscription is required. Your details stay on this device.'}
+        </Text>
+      </View>
     </View>
   );
 
   return (
     <View style={[styles.screen, { backgroundColor: palette.canvas }]}>
-      {palette.mode === 'dark' ? (
+      {dark ? (
         <>
           <ShellBackground />
           <View style={[StyleSheet.absoluteFill, styles.scrim]} />
+          {/* Darkens the form side a little more so the card reads cleanly over the artwork. */}
+          <View
+            pointerEvents="none"
+            style={[
+              StyleSheet.absoluteFill,
+              { experimental_backgroundImage: ar ? 'linear-gradient(90deg, rgba(2,5,14,0.55) 0%, rgba(2,5,14,0) 60%)' : 'linear-gradient(270deg, rgba(2,5,14,0.55) 0%, rgba(2,5,14,0) 60%)' },
+            ]}
+          />
         </>
       ) : null}
       <ScrollView
@@ -375,8 +351,8 @@ export default function ConnectionScreen({ onConnected }: Props) {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <View style={[styles.layout, { flexDirection: compact ? 'column' : rowDirection }]}>
-          {presentation}
+        <View style={[styles.layout, compact && styles.layoutCompact, { flexDirection: compact ? 'column' : rowDirection }]}>
+          {brand}
           {form}
         </View>
         <Text style={[styles.credit, { color: palette.muted }]}>{ar ? 'تصميم عبدالرحمن عامر' : 'Design by Abdulrahman Amer'}</Text>
@@ -387,29 +363,10 @@ export default function ConnectionScreen({ onConnected }: Props) {
 
 function Feature({ icon, label, palette }: { icon: AppIconName; label: string; palette: Palette }) {
   return (
-    <View style={[styles.feature, { borderColor: palette.glassBorder, experimental_backgroundImage: palette.glass }]}>
-      <AppIcon name={icon} size={18} color={palette.accent.light} />
-      <Text style={[styles.featureText, { color: palette.text }]}>{label}</Text>
+    <View style={styles.feature}>
+      <AppIcon name={icon} size={16} color={palette.secondary} />
+      <Text style={[styles.featureText, { color: palette.secondary }]}>{label}</Text>
     </View>
-  );
-}
-
-function SegmentButton({ label, active, onPress, palette }: { label: string; active: boolean; onPress: () => void; palette: Palette }) {
-  return (
-    <Pressable
-      focusable
-      accessibilityRole="tab"
-      accessibilityState={{ selected: active }}
-      onPress={onPress}
-      style={({ focused, pressed }) => [
-        styles.segmentButton,
-        active && { experimental_backgroundImage: palette.accent.gradient },
-        focused && { borderColor: palette.focus, boxShadow: palette.accent.focusShadow },
-        pressed && styles.pressed,
-      ]}
-    >
-      <Text style={[styles.segmentText, { color: active ? '#FFFFFF' : palette.secondary }]}>{label}</Text>
-    </Pressable>
   );
 }
 
@@ -442,25 +399,37 @@ function Field({
   preferred?: boolean;
 }) {
   const [focused, setFocused] = useState(false);
+  const dark = palette.mode === 'dark';
   return (
-    <View style={styles.field}>
-      <Text style={[styles.fieldLabel, { color: palette.secondary, textAlign: ar ? 'right' : 'left' }]}>{label}</Text>
-      <View
-        style={[
-          styles.inputWrap,
-          { flexDirection: ar ? 'row-reverse' : 'row', borderColor: focused ? palette.focus : palette.glassBorder, backgroundColor: palette.surfaceHover },
-          focused && { boxShadow: palette.accent.focusShadow },
-        ]}
-      >
-        <AppIcon name={icon} size={18} color={focused ? palette.accent.light : palette.muted} />
+    <View
+      style={[
+        styles.inputWrap,
+        {
+          flexDirection: ar ? 'row-reverse' : 'row',
+          borderColor: focused ? palette.focus : palette.glassBorder,
+          backgroundColor: dark ? 'rgba(3,7,18,0.52)' : palette.surface,
+        },
+        focused && { boxShadow: palette.accent.focusShadow },
+      ]}
+    >
+      <AppIcon name={icon} size={18} color={focused ? palette.accent.light : palette.muted} />
+      {/* The label sits inside the field, above the value: compact enough for a 540dp-high TV screen. */}
+      <View style={styles.fieldBody}>
+        <Text
+          numberOfLines={1}
+          style={[styles.fieldLabel, { color: focused ? (dark ? palette.accent.light : palette.accent.deep) : palette.muted, textAlign: ar ? 'right' : 'left' }]}
+        >
+          {label}
+        </Text>
         <TextInput
           hasTVPreferredFocus={preferred}
+          accessibilityLabel={label}
           value={value}
           onChangeText={onChangeText}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
           placeholder={placeholder}
-          placeholderTextColor={palette.muted}
+          placeholderTextColor={dark ? 'rgba(150,165,195,0.55)' : 'rgba(117,109,97,0.6)'}
           secureTextEntry={secure}
           autoCapitalize="none"
           autoCorrect={false}
@@ -469,68 +438,111 @@ function Field({
             styles.input,
             { color: palette.text },
             ltrValue ? styles.ltrInput : { textAlign: ar ? 'right' : 'left' },
+            // Values stay left-to-right, but in Arabic they line up with the label on the right.
+            ltrValue && ar ? styles.ltrInputRtlSide : null,
           ]}
         />
-        {accessory}
       </View>
+      {accessory}
     </View>
   );
 }
 
-const T = SHASHTNA_THEME.typography;
-
 const styles = StyleSheet.create({
   screen: { flex: 1, overflow: 'hidden' },
-  scrim: { backgroundColor: 'rgba(2,5,16,0.5)' },
-  scroll: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 56, paddingVertical: 36 },
-  scrollCompact: { paddingHorizontal: 18, paddingVertical: 24 },
-  layout: { alignItems: 'center', gap: 48 },
+  scrim: { backgroundColor: 'rgba(2,5,16,0.52)' },
+  scroll: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 64, paddingVertical: 24 },
+  scrollCompact: { paddingHorizontal: 18, paddingVertical: 28 },
+  layout: { alignItems: 'center', justifyContent: 'center', gap: 56 },
+  layoutCompact: { gap: 26 },
   pressed: { opacity: SHASHTNA_THEME.opacity.pressed },
+  flipX: { transform: [{ scaleX: -1 }] },
 
-  presentation: { flex: 1, minWidth: 0, gap: 18 },
-  presentationCompact: { flex: 0, alignSelf: 'stretch', gap: 10 },
-  brandRow: { alignItems: 'center', gap: 16 },
-  logo: { width: 72, height: 72, borderRadius: 20 },
-  logoCompact: { width: 56, height: 56, borderRadius: 16 },
-  brandName: { fontSize: 26, fontWeight: '900', fontFamily: SHASHTNA_FONT.sans },
-  brandTag: { fontSize: 14, fontWeight: '800', marginTop: 2 },
-  headline: { fontSize: 44, lineHeight: 54, fontWeight: '900', fontFamily: SHASHTNA_FONT.display, marginTop: 10 },
-  body: { fontSize: T.size.body, lineHeight: T.lineHeight.body, maxWidth: 520 },
-  features: { gap: 10, flexWrap: 'wrap' },
-  feature: { height: 42, paddingHorizontal: 14, borderRadius: 21, borderWidth: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
-  featureText: { fontSize: 14, fontWeight: '800' },
-  posterFan: { marginTop: 14, gap: -18, alignItems: 'flex-end' },
-  fanPoster: { width: 96, height: 144, borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)', boxShadow: '0px 16px 30px rgba(0,0,0,0.5)' },
+  // Brand side
+  brand: { flexGrow: 1, flexShrink: 1, flexBasis: 0, minWidth: 0, maxWidth: 560 },
+  brandCompact: { flexGrow: 0, flexShrink: 0, flexBasis: 'auto', alignSelf: 'stretch', maxWidth: undefined },
+  iconStage: { width: 128, height: 128, alignItems: 'center', justifyContent: 'center', marginBottom: 22 },
+  iconStageCompact: { width: 96, height: 96, marginBottom: 14 },
+  halo: {
+    position: 'absolute',
+    width: 128,
+    height: 128,
+    borderRadius: 64,
+    backgroundColor: 'rgba(47,123,255,0.10)',
+    boxShadow: '0px 0px 64px rgba(47,123,255,0.30)',
+  },
+  haloCompact: { width: 96, height: 96, borderRadius: 48, boxShadow: '0px 0px 44px rgba(47,123,255,0.28)' },
+  icon: { width: 128, height: 128 },
+  iconCompact: { width: 96, height: 96 },
+  wordmark: { fontSize: 12, fontWeight: '800', letterSpacing: 4.2, fontFamily: SHASHTNA_FONT.sans },
+  tagline: {
+    fontSize: 38,
+    lineHeight: 56,
+    fontWeight: '800',
+    fontFamily: SHASHTNA_FONT.display,
+    marginTop: 12,
+  },
+  taglineLatin: { fontSize: 32, lineHeight: 44 },
+  taglineCompact: { fontSize: 24, lineHeight: 36, marginTop: 8 },
+  rule: { width: 44, height: 3, borderRadius: 2, marginTop: 22, marginBottom: 16 },
+  features: { alignItems: 'center', gap: 14 },
+  feature: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  featureText: { fontSize: 15, fontWeight: '700', fontFamily: SHASHTNA_FONT.sans },
+  featureDot: { width: 3, height: 3, borderRadius: 2, opacity: 0.8 },
 
-  card: { width: 460, borderRadius: 28, borderWidth: 1, padding: 28, gap: 14, boxShadow: '0px 24px 60px rgba(0,0,0,0.45)' },
-  cardCompact: { width: '100%', padding: 20 },
+  // Form card
+  card: {
+    width: 420,
+    borderRadius: 28,
+    borderWidth: 1,
+    paddingHorizontal: 28,
+    paddingTop: 22,
+    paddingBottom: 18,
+    gap: 16,
+    overflow: 'hidden',
+    boxShadow: '0px 30px 70px rgba(0,0,0,0.5)',
+  },
+  cardLight: { boxShadow: '0px 24px 50px rgba(60,50,30,0.12)' },
+  cardCompact: { width: '100%', paddingHorizontal: 20, paddingTop: 20 },
+  cardSheen: {
+    position: 'absolute',
+    top: 0,
+    left: 28,
+    right: 28,
+    height: 1,
+    experimental_backgroundImage: 'linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(200,222,255,0.55) 50%, rgba(255,255,255,0) 100%)',
+  },
+  cardSheenLight: { opacity: 0 },
   cardTop: { justifyContent: 'space-between', alignItems: 'center' },
-  status: { height: 32, paddingHorizontal: 12, borderRadius: 16, borderWidth: 1, alignItems: 'center', gap: 8 },
-  statusDot: { width: 8, height: 8, borderRadius: 4 },
-  statusText: { fontSize: 12, fontWeight: '800' },
-  langToggle: { height: 36, paddingHorizontal: 12, borderRadius: 18, borderWidth: 1, alignItems: 'center', gap: 6 },
+  cardTopEnd: { alignItems: 'center', gap: 12 },
+  status: { alignItems: 'center', gap: 8 },
+  statusDot: { width: 7, height: 7, borderRadius: 4 },
+  statusText: { fontSize: 12, fontWeight: '700' },
+  langToggle: { height: 34, paddingHorizontal: 12, borderRadius: 17, borderWidth: 1, alignItems: 'center', gap: 6 },
   langText: { fontSize: 13, fontWeight: '800' },
-  cardTitle: { fontSize: 28, fontWeight: '900', fontFamily: SHASHTNA_FONT.sans, marginTop: 4 },
-  cardSub: { fontSize: 14, lineHeight: 21, marginTop: -6 },
 
-  segment: { height: 48, borderRadius: 16, borderWidth: 1, padding: 4, gap: 4 },
-  segmentButton: { flex: 1, borderRadius: 12, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: 'transparent' },
-  segmentText: { fontSize: 15, fontWeight: '900' },
+  heading: { gap: 2, marginTop: -4 },
+  typeBadge: { height: 28, paddingHorizontal: 12, borderRadius: 14, borderWidth: 1, alignItems: 'center', gap: 6 },
+  typeBadgeText: { fontSize: 12, fontWeight: '900', letterSpacing: 1.6 },
+  cardTitle: { fontSize: 28, lineHeight: 36, fontWeight: '900', fontFamily: SHASHTNA_FONT.sans },
+  cardSub: { fontSize: 13, lineHeight: 19 },
 
-  field: { gap: 6 },
-  fieldLabel: { fontSize: 13, fontWeight: '800' },
-  inputWrap: { height: 56, borderRadius: 16, borderWidth: 2, paddingHorizontal: 14, alignItems: 'center', gap: 10 },
-  input: { flex: 1, fontSize: 16, fontFamily: SHASHTNA_FONT.sans, paddingVertical: 0 },
+  fields: { gap: 12 },
+  fieldBody: { flex: 1, minWidth: 0, justifyContent: 'center' },
+  fieldLabel: { fontSize: 11, fontWeight: '800', fontFamily: SHASHTNA_FONT.sans, letterSpacing: 0.2 },
+  inputWrap: { height: 58, borderRadius: 15, borderWidth: 1.5, paddingHorizontal: 16, alignItems: 'center', gap: 12 },
+  input: { height: 24, fontSize: 16, fontFamily: SHASHTNA_FONT.sans, paddingVertical: 0, paddingHorizontal: 0, marginTop: 1 },
   ltrInput: { textAlign: 'left', writingDirection: 'ltr' },
+  ltrInputRtlSide: { textAlign: 'right' },
   eye: { width: 38, height: 38, borderRadius: 12, borderWidth: 2, borderColor: 'transparent', alignItems: 'center', justifyContent: 'center' },
 
-  connect: { height: 58, borderRadius: 18, alignItems: 'center', justifyContent: 'center', gap: 10, marginTop: 6, borderWidth: 2, borderColor: 'transparent' },
+  connect: { height: 54, borderRadius: 16, alignItems: 'center', justifyContent: 'center', gap: 10, borderWidth: 2, borderColor: 'transparent' },
   connectLoading: { opacity: 0.85 },
-  connectText: { color: '#FFFFFF', fontSize: 17, fontWeight: '900' },
+  connectText: { color: '#FFFFFF', fontSize: 17, fontWeight: '900', fontFamily: SHASHTNA_FONT.sans, letterSpacing: 0.2 },
 
-  progressWrap: { gap: 6 },
-  progressTrack: { height: 6, borderRadius: 3, overflow: 'hidden' },
-  progressFill: { height: '100%', borderRadius: 3 },
+  progressWrap: { gap: 6, marginTop: -8 },
+  progressTrack: { height: 4, borderRadius: 2, overflow: 'hidden' },
+  progressFill: { height: '100%', borderRadius: 2 },
   progressText: { fontSize: 12, fontWeight: '700' },
 
   error: { gap: 10, padding: 14, borderRadius: 16, backgroundColor: 'rgba(242,89,106,0.10)', borderWidth: 1, borderColor: 'rgba(242,89,106,0.35)' },
@@ -541,6 +553,7 @@ const styles = StyleSheet.create({
   techToggleText: { fontSize: 12, fontWeight: '800' },
   techText: { fontSize: 11, lineHeight: 16, textAlign: 'left', writingDirection: 'ltr' },
 
-  note: { fontSize: 12, lineHeight: 18 },
-  credit: { textAlign: 'center', fontSize: 11, fontWeight: '700', marginTop: 24, letterSpacing: 0.4 },
+  footer: { alignItems: 'center', gap: 8, paddingTop: 12, borderTopWidth: 1 },
+  note: { flex: 1, fontSize: 12, lineHeight: 18 },
+  credit: { textAlign: 'center', fontSize: 11, fontWeight: '700', marginTop: 18, letterSpacing: 0.4 },
 });
