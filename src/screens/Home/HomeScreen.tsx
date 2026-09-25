@@ -82,56 +82,6 @@ function normalizeMatch(value: string) {
     .trim();
 }
 
-function matchTokens(value: string) {
-  return cleanTitle(value)
-    .toLowerCase()
-    .replace(/\b(?:19|20)\d{2}\b/g, ' ')
-    .replace(/&/g, 'and')
-    .split(/[^a-z0-9\u0600-\u06FF]+/)
-    .filter(Boolean);
-}
-
-function titleMatchScore(sourceTitle: string, metaTitle: string, sourceYear: number, metaYear: number) {
-  if (sourceYear && metaYear && sourceYear !== metaYear) {
-    return 0;
-  }
-
-  const sourceExact = normalizeMatch(sourceTitle);
-  const metaExact = normalizeMatch(metaTitle);
-  if (!sourceExact || !metaExact) return 0;
-
-  if (sourceExact === metaExact) {
-    return sourceYear && metaYear ? 105 : 100;
-  }
-
-  const sourceTokens = matchTokens(sourceTitle);
-  const metaTokens = matchTokens(metaTitle);
-  if (!sourceTokens.length || !metaTokens.length) return 0;
-
-  const metaSet = new Set(metaTokens);
-  const shared = sourceTokens.filter(token => metaSet.has(token)).length;
-  const coverage = shared / Math.max(sourceTokens.length, metaTokens.length);
-  const sourceFlat = sourceTokens.join('');
-  const metaFlat = metaTokens.join('');
-  const lengthRatio =
-    Math.min(sourceFlat.length, metaFlat.length) /
-    Math.max(sourceFlat.length, metaFlat.length);
-
-  if (coverage >= 0.85 && lengthRatio >= 0.72) {
-    return sourceYear && metaYear ? 92 : 88;
-  }
-
-  if (
-    coverage >= 0.72 &&
-    lengthRatio >= 0.82 &&
-    (sourceFlat.includes(metaFlat) || metaFlat.includes(sourceFlat))
-  ) {
-    return sourceYear && metaYear ? 86 : 82;
-  }
-
-  return 0;
-}
-
 /*
  * Title index for TMDB matching, built once per source list (the catalog's
  * lists never change), not on every Home visit: normalising tens of

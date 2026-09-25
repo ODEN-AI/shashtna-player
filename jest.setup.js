@@ -1,3 +1,4 @@
+/* eslint-env jest */
 /* Native modules are unavailable under Jest; provide inert stand-ins. */
 
 jest.mock('react-native-blob-util', () => {
@@ -21,6 +22,28 @@ jest.mock('react-native-blob-util', () => {
       files.set(to, files.get(from));
       files.delete(from);
       return true;
+    }),
+    // Streams a stored file (path or content:// URI) in small chunks so tests
+    // exercise lines and multi-byte text split across chunk boundaries.
+    __chunkSize: 7,
+    readStream: jest.fn(async path => {
+      const handlers = {};
+      return {
+        onData: fn => (handlers.data = fn),
+        onError: fn => (handlers.error = fn),
+        onEnd: fn => (handlers.end = fn),
+        open: () => {
+          setTimeout(() => {
+            if (!files.has(path)) {
+              handlers.error?.(new Error(`Permission Denial: no such file ${path}`));
+              return;
+            }
+            const text = files.get(path);
+            for (let i = 0; i < text.length; i += fs.__chunkSize) handlers.data?.(text.slice(i, i + fs.__chunkSize));
+            handlers.end?.();
+          }, 0);
+        },
+      };
     }),
   };
   return {
