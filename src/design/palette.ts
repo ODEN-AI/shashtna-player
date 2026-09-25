@@ -62,29 +62,30 @@ const DARK_BASE: BasePalette = {
   sidebar: g.sidebar,
 };
 
-// Warm ivory light theme: calmer than pure white, same hierarchy as dark.
+// Soft warm-stone light theme: low-glare, never pure white, same hierarchy as dark.
+// Page #EEECE7; cards sit one step lighter, inputs/hover one step darker.
 const LIGHT_BASE: BasePalette = {
   mode: 'light',
-  background: '#F7F5F0',
-  canvas: '#F7F5F0',
-  backgroundSoft: '#EFECE5',
-  surface: '#FFFDF9',
-  surfaceElevated: '#F3F0E9',
-  surfaceHover: 'rgba(60,50,30,0.05)',
-  glass: 'linear-gradient(160deg, rgba(255,253,249,0.92) 0%, rgba(243,240,233,0.88) 100%)',
-  glassBorder: 'rgba(60,50,30,0.10)',
-  border: '#E6E0D5',
-  borderStrong: '#D6CEC0',
-  text: '#1E1B16',
-  secondary: '#554E43',
-  muted: '#877F72',
+  background: '#EEECE7',
+  canvas: '#EEECE7',
+  backgroundSoft: '#E6E3DD',
+  surface: '#F5F3EF',
+  surfaceElevated: '#E8E5DF',
+  surfaceHover: 'rgba(60,50,30,0.06)',
+  glass: 'linear-gradient(160deg, rgba(245,243,239,0.94) 0%, rgba(236,233,227,0.90) 100%)',
+  glassBorder: 'rgba(60,50,30,0.12)',
+  border: '#DCD7CE',
+  borderStrong: '#CCC5B8',
+  text: '#1C1914',
+  secondary: '#4D463C',
+  muted: '#756D61',
   overlay: 'rgba(30,27,22,0.55)',
   heroFade:
-    'linear-gradient(90deg, rgba(247,245,240,0.98) 0%, rgba(247,245,240,0.86) 40%, rgba(247,245,240,0.2) 75%, rgba(247,245,240,0) 100%)',
+    'linear-gradient(90deg, rgba(238,236,231,0.98) 0%, rgba(238,236,231,0.86) 40%, rgba(238,236,231,0.2) 75%, rgba(238,236,231,0) 100%)',
   heroFadeRtl:
-    'linear-gradient(270deg, rgba(247,245,240,0.98) 0%, rgba(247,245,240,0.86) 40%, rgba(247,245,240,0.2) 75%, rgba(247,245,240,0) 100%)',
-  heroBottom: 'linear-gradient(0deg, rgba(247,245,240,1) 0%, rgba(247,245,240,0) 50%)',
-  sidebar: 'linear-gradient(180deg, #FFFDF9 0%, #F3F0E9 100%)',
+    'linear-gradient(270deg, rgba(238,236,231,0.98) 0%, rgba(238,236,231,0.86) 40%, rgba(238,236,231,0.2) 75%, rgba(238,236,231,0) 100%)',
+  heroBottom: 'linear-gradient(0deg, rgba(238,236,231,1) 0%, rgba(238,236,231,0) 50%)',
+  sidebar: 'linear-gradient(180deg, #F3F1EC 0%, #E8E5DF 100%)',
 };
 
 export function buildPalette(mode: 'dark' | 'light', accent: AccentTokens): Palette {
