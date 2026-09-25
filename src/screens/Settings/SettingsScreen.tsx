@@ -24,6 +24,8 @@ type Props = {
   themeMode: ThemeMode;
   setThemeMode: (value: ThemeMode) => void;
   onChangeSource: () => void;
+  /** Re-download the library (it is cached between launches). */
+  onRefreshLibrary?: () => void;
   onBack: () => void;
 };
 
@@ -39,6 +41,7 @@ export default function SettingsScreen({
   themeMode,
   setThemeMode,
   onChangeSource,
+  onRefreshLibrary,
   onBack,
 }: Props) {
   const ar = language === 'ar';
@@ -89,7 +92,7 @@ export default function SettingsScreen({
           <Text style={[styles.sectionTitle, { color: palette.text }]}>{ar ? 'اللغة' : 'Language'}</Text>
           <Text style={[styles.sectionSub, { color: palette.muted }]}>{ar ? 'اختر لغة واجهة التطبيق.' : 'Choose the application interface language.'}</Text>
           <View style={styles.optionGrid}>
-            <OptionCard icon="language" title="العربية" sub="RTL" selected={ar} onPress={()=>setLanguage('ar')} palette={palette}/>
+            <OptionCard icon="language" title="العربية" sub="RTL" selected={ar} onPress={()=>setLanguage('ar')} palette={palette} preferred/>
             <OptionCard icon="language" title="English" sub="LTR" selected={!ar} onPress={()=>setLanguage('en')} palette={palette}/>
           </View>
         </View>
@@ -144,14 +147,21 @@ export default function SettingsScreen({
             <View style={{flex:1}}><Text style={[styles.actionTitle,{color:palette.text}]}>{ar?'تغيير المصدر':'Change source'}</Text><Text style={[styles.actionSub,{color:palette.muted}]}>{ar?'تسجيل الدخول باشتراك IPTV آخر':'Sign in with another IPTV subscription'}</Text></View>
             <AppIcon name="chevron" size={14} color={palette.primary}/>
           </Pressable>
+          {onRefreshLibrary ? (
+            <Pressable focusable onPress={onRefreshLibrary} style={({focused})=>[styles.actionRow,{borderColor:palette.border,backgroundColor:palette.surface},focused&&styles.focus]}>
+              <View style={[styles.iconBadge,{backgroundColor:palette.primarySoft,borderColor:palette.border}]}><AppIcon name="refresh" size={17} color={palette.primary}/></View>
+              <View style={{flex:1}}><Text style={[styles.actionTitle,{color:palette.text}]}>{ar?'تحديث المكتبة':'Refresh library'}</Text><Text style={[styles.actionSub,{color:palette.muted}]}>{ar?'تحميل أحدث القنوات والمحتوى من اشتراكك الآن':'Load the latest channels and content from your subscription now'}</Text></View>
+              <AppIcon name="chevron" size={14} color={palette.primary}/>
+            </Pressable>
+          ) : null}
         </View>
       </ScrollView>
     </View>
   );
 }
 
-function OptionCard({ icon, title, sub, selected, onPress, palette }:{icon:'language'|'moon'|'sun';title:string;sub:string;selected:boolean;onPress:()=>void;palette:any}) {
-  return <Pressable focusable onPress={onPress} style={({focused})=>[styles.optionCard,{borderColor:palette.border,backgroundColor:palette.surface},selected&&{borderColor:palette.primary,backgroundColor:palette.primarySoft},focused&&styles.focus]}>
+function OptionCard({ icon, title, sub, selected, onPress, palette, preferred = false }:{icon:'language'|'moon'|'sun';title:string;sub:string;selected:boolean;onPress:()=>void;palette:any;preferred?:boolean}) {
+  return <Pressable focusable hasTVPreferredFocus={preferred} onPress={onPress} style={({focused})=>[styles.optionCard,{borderColor:palette.border,backgroundColor:palette.surface},selected&&{borderColor:palette.primary,backgroundColor:palette.primarySoft},focused&&styles.focus]}>
     <View style={[styles.iconBadge,{backgroundColor:palette.primarySoft,borderColor:palette.border}]}><AppIcon name={icon} size={18} color={palette.primary}/></View>
     <View style={{flex:1}}><Text style={[styles.optionTitle,{color:palette.text}]}>{title}</Text><Text style={[styles.optionSub,{color:palette.muted}]}>{sub}</Text></View>
     <View style={[styles.radio,{borderColor:palette.border},selected&&{borderColor:palette.primary,backgroundColor:palette.primary}]} />

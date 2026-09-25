@@ -5,6 +5,7 @@ import { BRAND_ASSETS } from '../design/brand';
 import { usePalette } from '../design/palette';
 import { SHASHTNA_THEME } from '../design/theme';
 import { useSidebarRailWidth } from '../navigation/Sidebar';
+import { FocusRegion } from '../navigation/tvFocus';
 
 type Props = {
   ar: boolean;
@@ -32,7 +33,8 @@ function AppShell({ ar, sidebar, children }: Props) {
       />
       {dark ? <ShellBackground /> : null}
       <View style={[styles.content, ar ? { paddingRight: railWidth } : { paddingLeft: railWidth }]}>
-        {children}
+        {/* Leaving the rail toward the page returns to the element last focused there. */}
+        <FocusRegion style={styles.content}>{children}</FocusRegion>
       </View>
       {sidebar}
     </View>

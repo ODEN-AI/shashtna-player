@@ -24,7 +24,7 @@ import { getTmdbMetadata, tmdbImageUrl, TmdbMediaMetadata } from '../../lib/tmdb
 import { getLatestEpisodeFor, getProgress, useContinueWatching } from '../continueWatching/continueWatchingStore';
 import { ActionButton, BackButton, DetailBackground, DetailHero, heroMetrics, InfoCard, MetaChip, SectionTitle } from './DetailParts';
 
-type Props = {
+export type SeriesDetailsProps = {
   channel: M3UChannel;
   onBack: () => void;
   onPlayEpisode: (episode: M3UChannel) => void;
@@ -37,7 +37,7 @@ type Props = {
  * rail and story/facts. Data comes from the Xtream series endpoint (unchanged)
  * with TMDB only as an artwork/overview fallback.
  */
-export default function SeriesDetailsScreen({ channel, onBack, onPlayEpisode, isFavorite, onToggleFavorite }: Props) {
+export default function SeriesDetailsScreen({ channel, onBack, onPlayEpisode, isFavorite, onToggleFavorite }: SeriesDetailsProps) {
   const { language } = useAppPreferences();
   const ar = language === 'ar';
   const palette = usePalette();

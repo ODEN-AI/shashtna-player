@@ -27,8 +27,8 @@ import { SHASHTNA_THEME } from '../../design/theme';
 import { useAppPreferences } from '../../design/AppPreferencesContext';
 import AppIcon, { AppIconName } from '../../components/common/AppIcon';
 import SeekBar from '../../features/player/SeekBar';
-import MovieDetailsScreen from '../../features/details/MovieDetailsScreen';
-import SeriesDetailsScreen from '../../features/details/SeriesDetailsScreen';
+import type { MovieDetailsProps } from '../../features/details/MovieDetailsScreen';
+import type { SeriesDetailsProps } from '../../features/details/SeriesDetailsScreen';
 import ChannelBanner, { ChannelBannerState } from '../../features/player/ChannelBanner';
 import { describePlaybackError } from '../../features/player/playbackErrors';
 import { createProgressStore, formatClock, ProgressStore } from '../../features/player/progressStore';
@@ -47,7 +47,7 @@ type PlayerScreenProps = {
   autoplay?: boolean;
   subtitles?: boolean;
   /** Live list the channel was opened from; enables in-player zapping. */
-  liveQueue?: M3UChannel[];
+  liveQueue?: readonly M3UChannel[];
   /** Open this series episode directly (Continue Watching). */
   startEpisode?: M3UChannel | null;
   /** Skip the movie details page and start playback (Continue Watching). */
@@ -55,6 +55,16 @@ type PlayerScreenProps = {
   /** Favorite state of `channel` (movie or series) for the detail pages. */
   isFavorite?: boolean;
   onToggleFavorite?: () => void;
+  /**
+   * Movie / series detail pages. Passed in by the Full app; Shashtna Player
+   * Lite has no VOD, so it omits them and their code is not in its bundle.
+   */
+  detailScreens?: PlayerDetailScreens;
+};
+
+export type PlayerDetailScreens = {
+  Movie: React.ComponentType<MovieDetailsProps>;
+  Series: React.ComponentType<SeriesDetailsProps>;
 };
 
 /** Coalesces rapid UP/DOWN presses so only the final channel opens a stream. */
@@ -1024,7 +1034,10 @@ export default function PlayerScreen({
   autoStart = false,
   isFavorite = false,
   onToggleFavorite,
+  detailScreens,
 }: PlayerScreenProps) {
+  const MovieDetailsScreen = detailScreens?.Movie;
+  const SeriesDetailsScreen = detailScreens?.Series;
   const { language } = useAppPreferences();
   const ar = language === 'ar';
   const [
@@ -2173,7 +2186,8 @@ export default function PlayerScreen({
   );
 
   if (
-    isMovieDetails
+    isMovieDetails &&
+    MovieDetailsScreen
   ) {
     return (
       <MovieDetailsScreen
@@ -2202,7 +2216,8 @@ export default function PlayerScreen({
   }
 
   if (
-    isSeriesDetails
+    isSeriesDetails &&
+    SeriesDetailsScreen
   ) {
     return (
       <SeriesDetailsScreen

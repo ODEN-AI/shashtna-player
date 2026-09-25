@@ -12,7 +12,7 @@ import { getProgress, useContinueWatching } from '../continueWatching/continueWa
 import { formatClock } from '../player/progressStore';
 import { ActionButton, BackButton, DetailBackground, DetailHero, formatDuration, heroMetrics, InfoCard, MetaChip } from './DetailParts';
 
-type Props = {
+export type MovieDetailsProps = {
   channel: M3UChannel;
   onBack: () => void;
   /** fromStart=true ignores the saved position. */
@@ -25,7 +25,7 @@ type Props = {
  * Movie detail page. Data comes from the Xtream VOD info endpoint with TMDB as
  * fallback (same sources as before); only the presentation is new.
  */
-export default function MovieDetailsScreen({ channel, onBack, onWatch, isFavorite, onToggleFavorite }: Props) {
+export default function MovieDetailsScreen({ channel, onBack, onWatch, isFavorite, onToggleFavorite }: MovieDetailsProps) {
   const { language } = useAppPreferences();
   const ar = language === 'ar';
   const palette = usePalette();

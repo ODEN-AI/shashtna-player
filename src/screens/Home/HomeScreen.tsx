@@ -1,4 +1,4 @@
-﻿import React, { memo, useEffect, useMemo, useState } from 'react';
+﻿import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Image,
   Pressable,
@@ -19,16 +19,14 @@ import HeroCarousel from '../../features/ads/HeroCarousel';
 import { useAdvertisements } from '../../features/ads/advertisementRepository';
 import { Advertisement } from '../../features/ads/types';
 import { ContinueWatchingEntry, useContinueWatching } from '../../features/continueWatching/continueWatchingStore';
+import { Catalog } from '../../features/catalog/catalog';
+import { toggleFavorite, useFavoriteKeys, useIsFavorite } from '../../features/favorites/favoritesStore';
+import { FocusRegion, screenMemory } from '../../navigation/tvFocus';
 
 type Props = {
-  channels: M3UChannel[];
-  channelCount: number;
-  movieCount: number;
-  seriesCount: number;
+  catalog: Catalog;
   onNavigate: (page: 'home'|'live'|'movies'|'series'|'favorites'|'search'|'settings') => void;
   onOpenPlayer: (channel: M3UChannel) => void;
-  favoriteIds?: string[];
-  onToggleFavorite?: (channel: M3UChannel) => void;
   onResume: (entry: ContinueWatchingEntry) => void;
   onOpenLiveGroup: (group: string) => void;
   onAdAction: (ad: Advertisement) => void;
@@ -134,14 +132,17 @@ function titleMatchScore(sourceTitle: string, metaTitle: string, sourceYear: num
   return 0;
 }
 
-function discoveryMatchesSource(
-  catalog: TmdbRecentItem[],
-  sourceItems: MediaItem[],
-): RankedItem[] {
-  if (!catalog.length || !sourceItems.length) return [];
+/*
+ * Title index for TMDB matching, built once per source list (the catalog's
+ * lists never change), not on every Home visit: normalising tens of
+ * thousands of titles with regexes was the most expensive part of opening Home.
+ */
+const titleIndexCache = new WeakMap<readonly MediaItem[], Map<string, MediaItem[]>>();
 
+function titleIndexFor(sourceItems: readonly MediaItem[]): Map<string, MediaItem[]> {
+  const cached = titleIndexCache.get(sourceItems);
+  if (cached) return cached;
   const byTitle = new Map<string, MediaItem[]>();
-
   for (const item of sourceItems) {
     const key = normalizeMatch(item.title);
     if (!key) continue;
@@ -149,6 +150,17 @@ function discoveryMatchesSource(
     if (bucket) bucket.push(item);
     else byTitle.set(key, [item]);
   }
+  titleIndexCache.set(sourceItems, byTitle);
+  return byTitle;
+}
+
+function discoveryMatchesSource(
+  catalog: TmdbRecentItem[],
+  sourceItems: readonly MediaItem[],
+): RankedItem[] {
+  if (!catalog.length || !sourceItems.length) return [];
+
+  const byTitle = titleIndexFor(sourceItems);
 
   const matched: RankedItem[] = [];
   const usedSourceIds = new Set<string>();
@@ -189,15 +201,36 @@ function discoveryMatchesSource(
   return matched;
 }
 
+const foreignCache = new WeakMap<readonly MediaItem[], MediaItem[]>();
+
+/** Non-Arabic titles (matched against TMDB), computed once per catalog list. */
+function foreignOf(items: readonly (MediaItem & { foreign?: boolean })[]): MediaItem[] {
+  const cached = foreignCache.get(items);
+  if (cached) return cached;
+  const result = items.filter(item => item.foreign ?? !hasArabicLetters(item.title));
+  foreignCache.set(items, result);
+  return result;
+}
+
+function withEmptyMeta(item: MediaItem): RankedItem {
+  return {
+    ...item,
+    meta: {
+      id: 0,
+      title: item.title,
+      overview: '',
+      posterPath: null,
+      backdropPath: null,
+      voteAverage: 0,
+      releaseDate: '',
+    },
+  };
+}
+
 export default function HomeScreen({
-  channels,
-  channelCount,
-  movieCount,
-  seriesCount,
+  catalog,
   onNavigate,
   onOpenPlayer,
-  favoriteIds = [],
-  onToggleFavorite,
   onResume,
   onOpenLiveGroup,
   onAdAction,
@@ -206,53 +239,12 @@ export default function HomeScreen({
   const { language } = useAppPreferences();
   const ar = language === 'ar';
   const palette = usePalette();
-  const favoriteSet = useMemo(()=>new Set(favoriteIds),[favoriteIds]);
+  const favoriteKeys = useFavoriteKeys();
 
-  const [foreignMovies, setForeignMovies] = useState<MediaItem[]>([]);
-  const [foreignSeries, setForeignSeries] = useState<MediaItem[]>([]);
-
-  useEffect(() => {
-    let alive = true;
-
-    const collectSourceItems = async () => {
-      // Let Home paint first, then scan the large channel array in chunks.
-      await new Promise<void>(resolve => setTimeout(resolve, 0));
-
-      const nextMovies: MediaItem[] = [];
-      const nextSeries: MediaItem[] = [];
-
-      for (let index = 0; index < channels.length; index += 1) {
-        const channel = channels[index];
-        if (channel.contentType !== 'movie' && channel.contentType !== 'series') continue;
-
-        const title = cleanTitle(channel.name);
-        if (hasArabicLetters(title)) continue;
-
-        const item: MediaItem = {
-          channel,
-          type: channel.contentType,
-          title,
-        };
-
-        if (channel.contentType === 'movie') nextMovies.push(item);
-        else nextSeries.push(item);
-
-        if (index > 0 && index % 1500 === 0) {
-          await new Promise<void>(resolve => setTimeout(resolve, 0));
-        }
-      }
-
-      if (!alive) return;
-      setForeignMovies(nextMovies);
-      setForeignSeries(nextSeries);
-    };
-
-    collectSourceItems();
-
-    return () => {
-      alive = false;
-    };
-  }, [channels]);
+  // Titles were cleaned once when the catalog was built; Home only picks the
+  // non-Arabic ones for TMDB matching (cached per catalog).
+  const foreignMovies = useMemo(() => foreignOf(catalog.movies), [catalog]);
+  const foreignSeries = useMemo(() => foreignOf(catalog.series), [catalog]);
 
   const [latestMovies, setLatestMovies] = useState<RankedItem[]>([]);
   const [latestSeries, setLatestSeries] = useState<RankedItem[]>([]);
@@ -300,58 +292,22 @@ export default function HomeScreen({
     return () => clearInterval(timer);
   }, []);
 
-  const fallbackMovies = useMemo<RankedItem[]>(
-    () =>
-      foreignMovies.map(item => ({
-        ...item,
-        meta: {
-          id: 0,
-          title: item.title,
-          overview: '',
-          posterPath: null,
-          backdropPath: null,
-          voteAverage: 0,
-          releaseDate: '',
-        },
-      })),
-    [foreignMovies],
-  );
-
-  const fallbackSeries = useMemo<RankedItem[]>(
-    () =>
-      foreignSeries.map(item => ({
-        ...item,
-        meta: {
-          id: 0,
-          title: item.title,
-          overview: '',
-          posterPath: null,
-          backdropPath: null,
-          voteAverage: 0,
-          releaseDate: '',
-        },
-      })),
-    [foreignSeries],
-  );
-
+  // Without TMDB matches, show 8 source titles. Only those 8 get a placeholder
+  // `meta` (previously every title in the library was copied to add one).
   const displayMovies = useMemo(
     () =>
-      rotate(
-        latestMovies.length ? latestMovies : fallbackMovies,
-        rotation,
-        8,
-      ),
-    [latestMovies, fallbackMovies, rotation],
+      latestMovies.length
+        ? rotate(latestMovies, rotation, 8)
+        : rotate(foreignMovies, rotation, 8).map(withEmptyMeta),
+    [latestMovies, foreignMovies, rotation],
   );
 
   const displaySeries = useMemo(
     () =>
-      rotate(
-        latestSeries.length ? latestSeries : fallbackSeries,
-        rotation + 3,
-        8,
-      ),
-    [latestSeries, fallbackSeries, rotation],
+      latestSeries.length
+        ? rotate(latestSeries, rotation + 3, 8)
+        : rotate(foreignSeries, rotation + 3, 8).map(withEmptyMeta),
+    [latestSeries, foreignSeries, rotation],
   );
 
   const recentMixed = useMemo(
@@ -377,23 +333,22 @@ export default function HomeScreen({
     [latestMovies, latestSeries],
   );
 
-  const liveCategories = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const channel of channels) {
-      if (channel.contentType !== 'live') continue;
-      const name = String(channel.group || '').trim();
-      if (name) counts.set(name, (counts.get(name) || 0) + 1);
-    }
-    return Array.from(counts, ([name, count]) => ({ name, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 12);
-  }, [channels]);
+  const liveCategories = useMemo(
+    () =>
+      [...catalog.liveGroups]
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 12)
+        .map(group => ({ name: group.key, count: group.count })),
+    [catalog],
+  );
 
   const ads = useAdvertisements();
   const continueWatching = useContinueWatching();
 
-  const isFav = (item: MediaItem) => favoriteSet.has(`${item.type}:${String(item.channel.id)}`);
-  const toggle = (item: MediaItem) => onToggleFavorite?.(item.channel);
+  const openItem = useCallback((item: MediaItem) => onOpenPlayer(item.channel), [onOpenPlayer]);
+  // First focus: the card the user opened last (coming back from the player),
+  // otherwise the first quick destination.
+  const rememberedFocus = useMemo(() => screenMemory.get<{ focusKey: string }>('home').focusKey || '', []);
   const locale = ar ? 'ar-IQ' : 'en-US';
   const rowDirection = ar ? 'row-reverse' : 'row';
   const compact = device === 'phone';
@@ -409,22 +364,31 @@ export default function HomeScreen({
         <HeroCarousel ads={ads} onAction={onAdAction} palette={palette} ar={ar} height={compact ? 260 : L.heroH} />
 
         {/* ================= QUICK DESTINATIONS ================= */}
-        <View style={[styles.pills, { flexDirection: rowDirection, borderColor: palette.border }]}>
-          <NavPill icon="live" label={ar ? 'البث المباشر' : 'Live TV'} count={channelCount.toLocaleString(locale)} onPress={() => onNavigate('live')} palette={palette} ar={ar} />
-          <NavPill icon="movies" label={ar ? 'الأفلام' : 'Movies'} count={movieCount.toLocaleString(locale)} onPress={() => onNavigate('movies')} palette={palette} ar={ar} />
-          <NavPill icon="series" label={ar ? 'المسلسلات' : 'Series'} count={seriesCount.toLocaleString(locale)} onPress={() => onNavigate('series')} palette={palette} ar={ar} />
-          <NavPill icon="favorites" label={ar ? 'قائمتي' : 'My list'} count={favoriteIds.length.toLocaleString(locale)} onPress={() => onNavigate('favorites')} palette={palette} ar={ar} />
-        </View>
+        <FocusRegion style={[styles.pills, { flexDirection: rowDirection, borderColor: palette.border }]}>
+          <NavPill icon="live" label={ar ? 'البث المباشر' : 'Live TV'} count={catalog.live.length.toLocaleString(locale)} onPress={() => onNavigate('live')} palette={palette} ar={ar} preferred={!rememberedFocus} />
+          <NavPill icon="movies" label={ar ? 'الأفلام' : 'Movies'} count={catalog.movies.length.toLocaleString(locale)} onPress={() => onNavigate('movies')} palette={palette} ar={ar} />
+          <NavPill icon="series" label={ar ? 'المسلسلات' : 'Series'} count={catalog.series.length.toLocaleString(locale)} onPress={() => onNavigate('series')} palette={palette} ar={ar} />
+          <NavPill icon="favorites" label={ar ? 'قائمتي' : 'My list'} count={favoriteKeys.length.toLocaleString(locale)} onPress={() => onNavigate('favorites')} palette={palette} ar={ar} />
+        </FocusRegion>
 
         {/* ================= CONTINUE WATCHING ================= */}
         {continueWatching.length ? (
           <View style={styles.section}>
             <SectionHeader title={ar ? 'متابعة المشاهدة' : 'Continue watching'} palette={palette} ar={ar} />
-            <HScroll ar={ar} contentContainerStyle={styles.row}>
-              {continueWatching.map(entry => (
-                <ContinueCard key={entry.key} entry={entry} onPress={() => onResume(entry)} palette={palette} ar={ar} />
-              ))}
-            </HScroll>
+            <FocusRegion>
+              <HScroll ar={ar} contentContainerStyle={styles.row}>
+                {continueWatching.map(entry => (
+                  <ContinueCard
+                    key={entry.key}
+                    entry={entry}
+                    onPress={() => onResume(entry)}
+                    palette={palette}
+                    ar={ar}
+                    preferred={rememberedFocus === `continue:${entry.key}`}
+                  />
+                ))}
+              </HScroll>
+            </FocusRegion>
           </View>
         ) : null}
 
@@ -435,9 +399,8 @@ export default function HomeScreen({
           keyPrefix="top"
           palette={palette}
           ar={ar}
-          isFav={isFav}
-          onToggle={onToggleFavorite ? toggle : undefined}
-          onOpen={item => onOpenPlayer(item.channel)}
+          onOpen={openItem}
+          rememberedFocus={rememberedFocus}
         />
         <MediaRow
           title={ar ? 'أحدث الأفلام' : 'Latest movies'}
@@ -447,9 +410,8 @@ export default function HomeScreen({
           keyPrefix="movies"
           palette={palette}
           ar={ar}
-          isFav={isFav}
-          onToggle={onToggleFavorite ? toggle : undefined}
-          onOpen={item => onOpenPlayer(item.channel)}
+          onOpen={openItem}
+          rememberedFocus={rememberedFocus}
         />
         <MediaRow
           title={ar ? 'أحدث المسلسلات' : 'Latest series'}
@@ -459,9 +421,8 @@ export default function HomeScreen({
           keyPrefix="series"
           palette={palette}
           ar={ar}
-          isFav={isFav}
-          onToggle={onToggleFavorite ? toggle : undefined}
-          onOpen={item => onOpenPlayer(item.channel)}
+          onOpen={openItem}
+          rememberedFocus={rememberedFocus}
         />
         <MediaRow
           title={ar ? 'وصل حديثاً' : 'Recently added'}
@@ -472,9 +433,8 @@ export default function HomeScreen({
           keyPrefix="recent"
           palette={palette}
           ar={ar}
-          isFav={isFav}
-          onToggle={onToggleFavorite ? toggle : undefined}
-          onOpen={item => onOpenPlayer(item.channel)}
+          onOpen={openItem}
+          rememberedFocus={rememberedFocus}
         />
 
         {/* ================= LIVE CATEGORIES ================= */}
@@ -487,7 +447,7 @@ export default function HomeScreen({
               palette={palette}
               ar={ar}
             />
-            <View style={[styles.categoryGrid, { flexDirection: rowDirection }]}>
+            <FocusRegion style={[styles.categoryGrid, { flexDirection: rowDirection }]}>
               {liveCategories.map(category => (
                 <Pressable
                   key={category.name}
@@ -509,7 +469,7 @@ export default function HomeScreen({
                   <Text style={[styles.categoryCount, { color: palette.muted }]}>{category.count.toLocaleString(locale)}</Text>
                 </Pressable>
               ))}
-            </View>
+            </FocusRegion>
           </View>
         ) : null}
       </ScrollView>
@@ -572,9 +532,8 @@ function MediaRow({
   keyPrefix,
   palette,
   ar,
-  isFav,
-  onToggle,
   onOpen,
+  rememberedFocus,
 }: {
   title: string;
   action?: string;
@@ -584,48 +543,56 @@ function MediaRow({
   keyPrefix: string;
   palette: Palette;
   ar: boolean;
-  isFav: (item: MediaItem) => boolean;
-  onToggle?: (item: MediaItem) => void;
   onOpen: (item: MediaItem) => void;
+  rememberedFocus: string;
 }) {
   if (!items.length) return null;
 
   return (
     <View style={styles.section}>
       <SectionHeader title={title} action={action} actionIcon={actionIcon} onAction={onAction} palette={palette} ar={ar} />
-      <HScroll ar={ar} contentContainerStyle={styles.row}>
-        {items.map(item => (
-          <PosterCard
-            key={`${keyPrefix}:${item.type}:${item.channel.id}`}
-            item={item}
-            favorite={isFav(item)}
-            onPress={() => onOpen(item)}
-            onToggleFavorite={onToggle ? () => onToggle(item) : undefined}
-            palette={palette}
-            ar={ar}
-          />
-        ))}
-      </HScroll>
+      {/* Each row remembers its focused card: UP/DOWN between rows returns to it. */}
+      <FocusRegion>
+        <HScroll ar={ar} contentContainerStyle={styles.row}>
+          {items.map(item => {
+            const focusKey = `${keyPrefix}:${item.type}:${item.channel.id}`;
+            return (
+              <PosterCard
+                key={focusKey}
+                focusKey={focusKey}
+                item={item}
+                onOpen={onOpen}
+                palette={palette}
+                ar={ar}
+                preferred={rememberedFocus === focusKey}
+              />
+            );
+          })}
+        </HScroll>
+      </FocusRegion>
     </View>
   );
 }
 
 const PosterCard = memo(function PosterCard({
   item,
-  favorite,
-  onPress,
-  onToggleFavorite,
+  focusKey,
+  onOpen,
   palette,
   ar,
+  preferred,
 }: {
   item: RankedItem;
-  favorite: boolean;
-  onPress: () => void;
-  onToggleFavorite?: () => void;
+  focusKey: string;
+  onOpen: (item: MediaItem) => void;
   palette: Palette;
   ar: boolean;
+  preferred: boolean;
 }) {
   const [failed, setFailed] = useState(false);
+  const favoriteKey = `${item.type}:${String(item.channel.id)}`;
+  const favorite = useIsFavorite(favoriteKey);
+  const remember = useCallback(() => screenMemory.set('home', { focusKey }), [focusKey]);
   const poster = tmdbImageUrl(item.meta?.posterPath, 'w342') || item.channel.logo || '';
   const rating = Number(item.meta?.voteAverage || 0);
   const year = item.meta?.releaseDate ? item.meta.releaseDate.slice(0, 4) : '';
@@ -634,9 +601,11 @@ const PosterCard = memo(function PosterCard({
     <View style={styles.posterWrap}>
       <Pressable
         focusable
+        hasTVPreferredFocus={preferred}
         accessibilityRole="button"
         accessibilityLabel={item.title}
-        onPress={onPress}
+        onPress={() => onOpen(item)}
+        onFocus={remember}
         style={({ focused, pressed }) => [
           styles.poster,
           { backgroundColor: palette.surfaceElevated, borderColor: palette.border },
@@ -645,7 +614,7 @@ const PosterCard = memo(function PosterCard({
         ]}
       >
         {poster && !failed ? (
-          <Image source={{ uri: poster }} style={styles.posterImage} onError={() => setFailed(true)} />
+          <Image source={{ uri: poster }} style={styles.posterImage} resizeMethod="resize" onError={() => setFailed(true)} />
         ) : (
           <View style={styles.posterFallback}>
             <AppIcon name={item.type === 'movie' ? 'movies' : 'series'} size={28} color={palette.muted} />
@@ -663,10 +632,11 @@ const PosterCard = memo(function PosterCard({
         ) : null}
       </Pressable>
 
-      {onToggleFavorite ? (
+      {favoriteKey ? (
         <Pressable
           focusable
-          onPress={onToggleFavorite}
+          onPress={() => toggleFavorite(favoriteKey)}
+          onFocus={remember}
           accessibilityRole="button"
           accessibilityLabel={favorite ? (ar ? 'إزالة من المفضلة' : 'Remove from favorites') : ar ? 'إضافة للمفضلة' : 'Add to favorites'}
           style={({ focused, pressed }) => [
@@ -697,11 +667,13 @@ const ContinueCard = memo(function ContinueCard({
   onPress,
   palette,
   ar,
+  preferred,
 }: {
   entry: ContinueWatchingEntry;
   onPress: () => void;
   palette: Palette;
   ar: boolean;
+  preferred: boolean;
 }) {
   const [failed, setFailed] = useState(false);
   const image = entry.item.logo || entry.parent?.logo || '';
@@ -717,9 +689,11 @@ const ContinueCard = memo(function ContinueCard({
     <View style={styles.continueWrap}>
       <Pressable
         focusable
+        hasTVPreferredFocus={preferred}
         accessibilityRole="button"
         accessibilityLabel={title}
         onPress={onPress}
+        onFocus={() => screenMemory.set('home', { focusKey: `continue:${entry.key}` })}
         style={({ focused, pressed }) => [
           styles.continueCard,
           { backgroundColor: palette.surfaceElevated, borderColor: palette.border },
@@ -728,7 +702,7 @@ const ContinueCard = memo(function ContinueCard({
         ]}
       >
         {image && !failed ? (
-          <Image source={{ uri: image }} style={styles.posterImage} onError={() => setFailed(true)} />
+          <Image source={{ uri: image }} style={styles.posterImage} resizeMethod="resize" onError={() => setFailed(true)} />
         ) : (
           <View style={styles.posterFallback}>
             <AppIcon name={entry.item.contentType === 'movie' ? 'movies' : 'series'} size={28} color={palette.muted} />
@@ -759,6 +733,7 @@ function NavPill({
   onPress,
   palette,
   ar,
+  preferred = false,
 }: {
   icon: AppIconName;
   label: string;
@@ -766,10 +741,13 @@ function NavPill({
   onPress: () => void;
   palette: Palette;
   ar: boolean;
+  preferred?: boolean;
 }) {
   return (
     <Pressable
       focusable
+      hasTVPreferredFocus={preferred}
+      onFocus={() => screenMemory.set('home', { focusKey: '' })}
       accessibilityRole="button"
       accessibilityLabel={label}
       onPress={onPress}

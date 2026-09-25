@@ -463,15 +463,24 @@ async function xtreamRequest<T>(
   );
 }
 
+/*
+ * Attribute patterns are compiled once. Building a RegExp per attribute per
+ * line cost four regex compilations for every playlist entry.
+ */
+const ATTRIBUTE_PATTERNS: Record<string, RegExp> = {
+  'group-title': /group-title="([^"]*)"/i,
+  'tvg-logo': /tvg-logo="([^"]*)"/i,
+  'tvg-id': /tvg-id="([^"]*)"/i,
+  'tvg-name': /tvg-name="([^"]*)"/i,
+};
+
 function parseAttribute(
   line: string,
   attribute: string,
 ): string {
   const regex =
-    new RegExp(
-      `${attribute}="([^"]*)"`,
-      'i',
-    );
+    ATTRIBUTE_PATTERNS[attribute] ||
+    new RegExp(`${attribute}="([^"]*)"`, 'i');
 
   return (
     line.match(regex)?.[1] ?? ''
@@ -529,7 +538,7 @@ function classifyPlainM3UEntry(
   return 'live';
 }
 
-function createPlainM3UChannel(
+export function createPlainM3UChannel(
   line: string,
   url: string,
   index: number,
@@ -588,86 +597,108 @@ function createPlainM3UChannel(
   };
 }
 
+export type ParseOptions = {
+  /** Keep live channels only (Shashtna Player Lite). */
+  liveOnly?: boolean;
+};
+
+/**
+ * Incremental M3U text parser: feed it chunks in order, then `end()`.
+ * Lines split across chunks are carried over, so any chunk size works.
+ * Shared by URL downloads and imported files.
+ */
+export function createM3UTextParser(
+  options: ParseOptions = {},
+  onChannelCount?: (count: number) => void,
+) {
+  const channels: M3UChannel[] = [];
+  let entryIndex = 0;
+  let buffer = '';
+  let pendingExtInf = '';
+  let sawHeaderOrEntry = false;
+
+  const handleLine = (rawLine: string) => {
+    const line = rawLine.trim();
+    if (!line) return;
+    if (line.startsWith('#EXTINF:')) {
+      pendingExtInf = line;
+      sawHeaderOrEntry = true;
+      return;
+    }
+    if (line.startsWith('#')) {
+      if (line.startsWith('#EXTM3U')) sawHeaderOrEntry = true;
+      return;
+    }
+    if (!pendingExtInf) return;
+    const channel = createPlainM3UChannel(pendingExtInf, line, entryIndex);
+    entryIndex += 1;
+    pendingExtInf = '';
+    if (options.liveOnly && channel.contentType !== 'live') return;
+    channels.push(channel);
+    if (channels.length % 500 === 0) onChannelCount?.(channels.length);
+  };
+
+  return {
+    push(text: string) {
+      buffer += text;
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() ?? '';
+      for (const line of lines) handleLine(line);
+    },
+    end(): M3UChannel[] {
+      if (buffer) handleLine(buffer);
+      buffer = '';
+      onChannelCount?.(channels.length);
+      return channels;
+    },
+    /** True once an #EXTM3U header or #EXTINF entry was seen. */
+    looksLikeM3U: () => sawHeaderOrEntry,
+  };
+}
+
+export class PlaylistFormatError extends Error {
+  constructor() {
+    super('The file is not an M3U playlist (no #EXTM3U / #EXTINF lines found).');
+    this.name = 'PlaylistFormatError';
+  }
+}
+
+/*
+ * Reads a playlist from a file path or content:// URI as a UTF-8 stream
+ * (react-native-blob-util decodes with an InputStreamReader, so multi-byte
+ * Arabic characters are never split between chunks). The file is never
+ * loaded into memory whole.
+ *
+ * Chunks were 64 KB with a 100 ms sleep between them, so a 50 MB playlist
+ * spent ~80 s just waiting. 256 KB chunks with a 4 ms pause read the same
+ * file in about a second of waiting while still yielding to the UI thread.
+ */
 async function parsePlainM3UFile(
   filePath: string,
   onChannelCount?: (
     count: number,
   ) => void,
+  options: ParseOptions = {},
+  onBytes?: (received: number) => void,
 ): Promise<M3UChannel[]> {
-  const channels: M3UChannel[] =
-    [];
+  const parser = createM3UTextParser(options, onChannelCount);
 
   const stream =
     await ReactNativeBlobUtil.fs.readStream(
       filePath,
       'utf8',
-      64 * 1024,
-      100,
+      256 * 1024,
+      4,
     );
 
-  let buffer = '';
-  let pendingExtInf = '';
+  let received = 0;
 
   const handleText = (
     text: string,
   ) => {
-    buffer += text;
-
-    const lines =
-      buffer.split(/\r?\n/);
-
-    buffer =
-      lines.pop() ?? '';
-
-    for (
-      const rawLine of lines
-    ) {
-      const line =
-        rawLine.trim();
-
-      if (!line) {
-        continue;
-      }
-
-      if (
-        line.startsWith(
-          '#EXTINF:',
-        )
-      ) {
-        pendingExtInf = line;
-        continue;
-      }
-
-      if (
-        line.startsWith('#')
-      ) {
-        continue;
-      }
-
-      if (
-        pendingExtInf
-      ) {
-        channels.push(
-          createPlainM3UChannel(
-            pendingExtInf,
-            line,
-            channels.length,
-          ),
-        );
-
-        pendingExtInf = '';
-
-        if (
-          channels.length %
-            100 ===
-          0
-        ) {
-          onChannelCount?.(
-            channels.length,
-          );
-        }
-      }
-    }
+    parser.push(text);
+    received += text.length;
+    onBytes?.(received);
   };
 
   return new Promise(
@@ -700,16 +731,11 @@ async function parsePlainM3UFile(
 
       stream.onEnd(() => {
         try {
-          if (buffer) {
-            handleText(
-              '\n',
-            );
+          const channels = parser.end();
+          if (!channels.length && !parser.looksLikeM3U()) {
+            reject(new PlaylistFormatError());
+            return;
           }
-
-          onChannelCount?.(
-            channels.length,
-          );
-
           resolve(
             channels,
           );
@@ -775,10 +801,15 @@ async function loadXtream(
   onChannelCount?: (
     count: number,
   ) => void,
+  options: ParseOptions = {},
 ): Promise<M3UChannel[]> {
   currentXtreamSession =
     session;
 
+  const none = Promise.resolve([] as never[]);
+
+  // Lite asks for live data only: 2 requests instead of 6, and the (usually
+  // far larger) VOD and series JSON is never downloaded or parsed.
   const [
     liveCategories,
     movieCategories,
@@ -794,13 +825,13 @@ async function loadXtream(
         session,
         'get_live_categories',
       ),
-      xtreamRequest<
+      options.liveOnly ? none : xtreamRequest<
         XtreamCategory[]
       >(
         session,
         'get_vod_categories',
       ),
-      xtreamRequest<
+      options.liveOnly ? none : xtreamRequest<
         XtreamCategory[]
       >(
         session,
@@ -812,13 +843,13 @@ async function loadXtream(
         session,
         'get_live_streams',
       ),
-      xtreamRequest<
+      options.liveOnly ? none : xtreamRequest<
         XtreamMovieStream[]
       >(
         session,
         'get_vod_streams',
       ),
-      xtreamRequest<
+      options.liveOnly ? none : xtreamRequest<
         XtreamSeries[]
       >(
         session,
@@ -1071,12 +1102,23 @@ async function loadXtream(
   return channels;
 }
 
+/** A playlist picked from the device (Android content:// or file://). */
+export function isLocalPlaylistSource(source: string): boolean {
+  return /^(content|file):\/\//i.test(source.trim());
+}
+
+export type LoadOptions = ParseOptions & {
+  /** Size of a local file in bytes, when known, for progress reporting. */
+  sizeHint?: number;
+};
+
 export async function downloadAndParseM3U(
   url: string,
   onProgress?: DownloadProgress,
   onChannelCount?: (
     count: number,
   ) => void,
+  options: LoadOptions = {},
 ): Promise<M3UChannel[]> {
   const xtreamSession =
     parseXtreamUrl(url);
@@ -1085,7 +1127,19 @@ export async function downloadAndParseM3U(
     return loadXtream(
       xtreamSession,
       onChannelCount,
+      options,
     );
+  }
+
+  if (isLocalPlaylistSource(url)) {
+    // Read straight from the picked document; nothing is copied or buffered whole.
+    const total = options.sizeHint || 0;
+    onProgress?.(0, total);
+    const channels = await parsePlainM3UFile(url.trim(), onChannelCount, options, received =>
+      onProgress?.(total ? Math.min(received, total) : received, total),
+    );
+    onProgress?.(total, total);
+    return channels;
   }
 
   const response =
@@ -1125,6 +1179,7 @@ export async function downloadAndParseM3U(
       await parsePlainM3UFile(
         filePath,
         onChannelCount,
+        options,
       );
 
     onProgress?.(
@@ -1483,6 +1538,18 @@ export async function getSeriesFirstEpisode(
       ),
   };
 }
+
+/** Xtream credentials embedded in a saved source, or null for other sources. */
+export function getXtreamSessionFromSource(source: string): XtreamSession | null {
+  return parseXtreamUrl(source);
+}
+
+/** Makes detail/episode requests work for a library restored from cache. */
+export function activateXtreamSession(session: XtreamSession | null): void {
+  currentXtreamSession = session;
+}
+
+export type { XtreamSession };
 
 export function clearXtreamSession(): void {
   currentXtreamSession =

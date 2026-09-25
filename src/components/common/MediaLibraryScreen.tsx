@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
   Image,
@@ -16,52 +16,49 @@ import { useAppPreferences } from '../../design/AppPreferencesContext';
 import { useDeviceClass } from '../../design/device';
 import { posterGridLayout, PosterGridLayout } from './posterGrid';
 import { focusStyle, Palette, usePalette } from '../../design/palette';
+import { ALL_GROUP, CatalogGroup, CatalogItem } from '../../features/catalog/catalog';
+import { createSearcher, sortedByTitle } from '../../features/catalog/search';
+import { toggleFavorite, useIsFavorite } from '../../features/favorites/favoritesStore';
+import { FocusRegion, initialRowFor, screenMemory } from '../../navigation/tvFocus';
 
 type MediaType = 'movie' | 'series';
-type PageName = 'home'|'live'|'movies'|'series'|'favorites'|'search'|'settings';
 type Props = {
   type: MediaType;
   title: string;
-  channels: M3UChannel[];
+  /** Catalog slices, built once per source (see features/catalog). */
+  items: CatalogItem[];
+  groups: CatalogGroup[];
+  itemsByGroup: Map<string, CatalogItem[]>;
   onOpenPlayer: (c: M3UChannel) => void;
-  onNavigate: (page: PageName) => void;
   onBack: () => void;
-  favoriteIds?: string[];
-  onToggleFavorite?: (channel: M3UChannel) => void;
 };
-type Item = { channel: M3UChannel; title: string; group: string; episodeCount: number };
 type SortMode = 'latest' | 'rating' | 'az';
-const ALL_GROUPS = '__all__';
+type LibraryMemory = { group: string; sort: SortMode; query: string; focusKey: string };
 
-function clean(v: string) {
-  return String(v || '')
-    .replace(/\[[^\]]*\]/g, ' ')
-    .replace(/\b(?:2160p|1080p|720p|576p|480p|4k|2k|fhd|uhd|hd|sd)\b/gi, ' ')
-    .replace(/\b(?:web[- ]?dl|web[- ]?rip|webrip|bluray|blu[- ]?ray|hdr|hevc|h264|h265|x264|x265|aac|dubbed|dual[- ]?audio)\b/gi, ' ')
-    .replace(/\b(?:S\d{1,2}E\d{1,3}|S\d{1,2}|E\d{1,3})\b/gi, ' ')
-    .replace(/[_.]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
+const SEARCH_DEBOUNCE_MS = 180;
 
-function buildItems(channels: M3UChannel[], type: MediaType): Item[] {
-  const map = new Map<string, Item>();
-  for (const c of channels.filter(x => x.contentType === type)) {
-    const title = clean(c.name) || c.name;
-    const key = type === 'series' ? title.toLowerCase() : String(c.id);
-    const old = map.get(key);
-    if (old) {
-      old.episodeCount += 1;
-      if (!old.channel.logo && c.logo) old.channel = c;
-    } else {
-      map.set(key, { channel: c, title, group: String(c.group || ''), episodeCount: 1 });
-    }
-  }
-  return [...map.values()];
-}
-
-function MediaCard({ item, type, onPress, isFavorite, onToggleFavorite, palette, ar, grid }: { item: Item; type: MediaType; onPress: () => void; isFavorite?: boolean; onToggleFavorite?: (channel: M3UChannel) => void; palette: Palette; ar: boolean; grid: PosterGridLayout }) {
+const MediaCard = memo(function MediaCard({
+  item,
+  type,
+  onOpen,
+  palette,
+  ar,
+  grid,
+  preferred,
+  memoryKey,
+}: {
+  item: CatalogItem;
+  type: MediaType;
+  onOpen: (item: CatalogItem) => void;
+  palette: Palette;
+  ar: boolean;
+  grid: PosterGridLayout;
+  preferred: boolean;
+  memoryKey: string;
+}) {
   const [failed, setFailed] = useState(false);
+  // Subscribes to this card's key only: toggling one heart re-renders one card.
+  const isFavorite = useIsFavorite(item.key);
   const poster = item.channel.logo || '';
   const title = item.title;
   const rawYear = (item.channel as any).releaseDate;
@@ -70,14 +67,18 @@ function MediaCard({ item, type, onPress, isFavorite, onToggleFavorite, palette,
   const meta = type === 'series'
     ? `${item.episodeCount} ${ar ? 'حلقة' : item.episodeCount === 1 ? 'Episode' : 'Episodes'}${year ? ` • ${year}` : ''}`
     : year || item.group || typeLabel;
+  // Focus only writes to screen memory; it never triggers a render.
+  const remember = useCallback(() => screenMemory.set<LibraryMemory>(memoryKey, { focusKey: item.key }), [memoryKey, item.key]);
 
   return (
     <View style={[styles.cardWrap, { width: grid.cardWidth }]}>
       <Pressable
         focusable
+        hasTVPreferredFocus={preferred}
         accessibilityRole="button"
         accessibilityLabel={`${typeLabel} ${title}`}
-        onPress={onPress}
+        onPress={() => onOpen(item)}
+        onFocus={remember}
         style={({ focused, pressed }) => [
           styles.posterFrame,
           { width: grid.cardWidth, height: grid.cardHeight },
@@ -87,7 +88,9 @@ function MediaCard({ item, type, onPress, isFavorite, onToggleFavorite, palette,
         ]}
       >
         {poster && !failed ? (
-          <Image source={{ uri: poster }} style={styles.posterImage} resizeMode="cover" onError={() => setFailed(true)} />
+          // resizeMethod="resize": decode the provider's (often full-size) poster at card
+          // size instead of keeping the full bitmap in memory for every visible card.
+          <Image source={{ uri: poster }} style={styles.posterImage} resizeMode="cover" resizeMethod="resize" onError={() => setFailed(true)} />
         ) : (
           <View style={styles.posterFallback}>
             <AppIcon name={type === 'movie' ? 'movies' : 'series'} size={28} color={palette.muted} />
@@ -102,33 +105,37 @@ function MediaCard({ item, type, onPress, isFavorite, onToggleFavorite, palette,
           </View>
         ) : null}
       </Pressable>
-      {onToggleFavorite ? (
-        <Pressable
-          focusable
-          accessibilityRole="button"
-          accessibilityLabel={isFavorite ? (ar ? 'إزالة من قائمتي' : 'Remove from My List') : (ar ? 'إضافة إلى قائمتي' : 'Add to My List')}
-          onPress={(event: any) => {
-            event?.stopPropagation?.();
-            onToggleFavorite(item.channel);
-          }}
-          style={({ focused, pressed }) => [
-            styles.favoriteButton,
-            ar ? styles.favoriteRtl : styles.favoriteLtr,
-            isFavorite && styles.favoriteButtonActive,
-            focused && focusStyle(palette, SHASHTNA_THEME.focus.iconScale),
-            pressed && styles.pressed,
-          ]}
-        >
-          <AppIcon name={isFavorite ? 'favorite' : 'favorites'} size={14} color="#FFFFFF" />
-        </Pressable>
-      ) : null}
+      <Pressable
+        focusable
+        accessibilityRole="button"
+        accessibilityLabel={isFavorite ? (ar ? 'إزالة من قائمتي' : 'Remove from My List') : (ar ? 'إضافة إلى قائمتي' : 'Add to My List')}
+        onPress={(event: any) => {
+          event?.stopPropagation?.();
+          toggleFavorite(item.key);
+        }}
+        onFocus={remember}
+        style={({ focused, pressed }) => [
+          styles.favoriteButton,
+          ar ? styles.favoriteRtl : styles.favoriteLtr,
+          isFavorite && styles.favoriteButtonActive,
+          focused && focusStyle(palette, SHASHTNA_THEME.focus.iconScale),
+          pressed && styles.pressed,
+        ]}
+      >
+        <AppIcon name={isFavorite ? 'favorite' : 'favorites'} size={14} color="#FFFFFF" />
+      </Pressable>
       <Text numberOfLines={1} style={[styles.mediaName, { color: palette.text, textAlign: ar ? 'right' : 'left' }]}>{title}</Text>
       <Text numberOfLines={1} style={[styles.mediaMeta, { color: palette.muted, textAlign: ar ? 'right' : 'left' }]}>{meta}</Text>
     </View>
   );
+});
+
+/** Height of one grid row; every row is identical, which enables getItemLayout. */
+function rowHeightFor(grid: PosterGridLayout) {
+  return grid.cardHeight + CARD_TEXT_HEIGHT + ROW_GAP;
 }
 
-export default function MediaLibraryScreen({ type, title, channels, onOpenPlayer, onBack, favoriteIds = [], onToggleFavorite }: Props) {
+export default function MediaLibraryScreen({ type, title, items, groups: catalogGroups, itemsByGroup, onOpenPlayer, onBack }: Props) {
   const { language } = useAppPreferences();
   const palette = usePalette();
   const ar = language === 'ar';
@@ -140,125 +147,182 @@ export default function MediaLibraryScreen({ type, title, channels, onOpenPlayer
   const [gridWidth, setGridWidth] = useState(0);
   const grid = useMemo(() => posterGridLayout(gridWidth - GRID_PAD_X * 2, device), [gridWidth, device]);
   const gridReady = device === 'tv' || gridWidth > 0;
-  const items = useMemo(() => buildItems(channels, type), [channels, type]);
-  const favoriteSet = useMemo(() => new Set(favoriteIds), [favoriteIds]);
+
+  // Restore the category, sort, search and focused card from before the
+  // player / details screen replaced this page.
+  const memoryKey = `library:${type}`;
+  const remembered = useRef(screenMemory.get<LibraryMemory>(memoryKey)).current;
+  const [group, setGroup] = useState(remembered.group && (remembered.group === ALL_GROUP || itemsByGroup.has(remembered.group)) ? remembered.group : ALL_GROUP);
+  const [sort, setSort] = useState<SortMode>(remembered.sort || 'latest');
+  const [queryInput, setQueryInput] = useState(remembered.query || '');
+  const [query, setQuery] = useState(remembered.query || '');
+  const [sheet, setSheet] = useState<'group' | 'sort' | null>(null);
+  const [ratings, setRatings] = useState<Record<string, number>>({});
+  const [searchFocused, setSearchFocused] = useState(false);
+
+  useEffect(() => {
+    screenMemory.set<LibraryMemory>(memoryKey, { group, sort, query });
+  }, [memoryKey, group, sort, query]);
+
+  // Debounced: typing fast filters once per pause, not once per character.
+  useEffect(() => {
+    if (queryInput === query) return;
+    const timer = setTimeout(() => setQuery(queryInput), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [queryInput, query]);
+
   // Every category with its title count; the sheet lists them all, so none are cut off.
-  const groups = useMemo<FilterOption[]>(() => {
-    const counts = new Map<string, number>();
-    for (const i of items) if (i.group) counts.set(i.group, (counts.get(i.group) || 0) + 1);
-    return [
-      { key: ALL_GROUPS, label: ar ? 'الكل' : 'All', count: items.length },
-      ...Array.from(counts, ([name, count]) => ({ key: name, label: name, count })),
-    ];
-  }, [items, ar]);
+  const groups = useMemo<FilterOption[]>(
+    () => [{ key: ALL_GROUP, label: ar ? 'الكل' : 'All', count: items.length }, ...catalogGroups],
+    [catalogGroups, items.length, ar],
+  );
   const sortOptions = useMemo<FilterOption[]>(() => [
     { key: 'latest', label: ar ? 'الأحدث' : 'Latest', icon: 'clock' },
     { key: 'rating', label: ar ? 'الأعلى تقييماً' : 'Top rated', icon: 'star' },
     { key: 'az', label: ar ? 'أبجدي (A-Z)' : 'A-Z', icon: 'grid' },
   ], [ar]);
-  const [query, setQuery] = useState('');
-  const [group, setGroup] = useState(ALL_GROUPS);
-  const [sort, setSort] = useState<SortMode>('latest');
-  const [sheet, setSheet] = useState<'group' | 'sort' | null>(null);
-  const [ratings, setRatings] = useState<Record<string, number>>({});
-  const [searchFocused, setSearchFocused] = useState(false);
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const arr = items.filter(i =>
-      (group === ALL_GROUPS || i.group === group) &&
-      (!q || i.title.toLowerCase().includes(q) || i.group.toLowerCase().includes(q)),
-    );
-    if (sort === 'az') arr.sort((a, b) => a.title.localeCompare(b.title, ar ? 'ar' : 'en'));
-    if (sort === 'rating') arr.sort((a, b) => (ratings[String(b.channel.id)] || 0) - (ratings[String(a.channel.id)] || 0));
-    return arr;
-  }, [items, query, group, sort, ratings, ar]);
+  // Category = Map lookup; search = precomputed keys, refined while typing.
+  const searcher = useMemo(() => createSearcher<CatalogItem>(item => item.search), []);
+  const base = useMemo(() => (group === ALL_GROUP ? items : itemsByGroup.get(group) || []), [group, items, itemsByGroup]);
+  const ordered = useMemo(
+    () => (sort === 'az' ? sortedByTitle(base, item => item.title) : base),
+    [base, sort],
+  );
+  const searched = useMemo(() => searcher(ordered, query), [searcher, ordered, query]);
+  const filtered = useMemo(
+    () =>
+      sort === 'rating'
+        ? [...searched].sort((a, b) => (ratings[a.key] || 0) < (ratings[b.key] || 0) ? 1 : (ratings[a.key] || 0) > (ratings[b.key] || 0) ? -1 : 0)
+        : searched,
+    [searched, sort, ratings],
+  );
 
+  // Ratings are fetched for the first 20 matches of the unsorted result, so
+  // the fetch does not depend on the order it produces.
+  const ratingTargets = useMemo(() => (sort === 'rating' ? searched.slice(0, 20) : []), [sort, searched]);
   useEffect(() => {
-    if (sort !== 'rating') return;
+    if (!ratingTargets.length) return;
     let alive = true;
-    const targets = filtered.slice(0, 20);
-    Promise.all(targets.map(async item => {
+    Promise.all(ratingTargets.map(async item => {
       try {
         const m = await getTmdbMetadata({ ...item.channel, name: item.title }, type);
-        return [String(item.channel.id), Number(m?.voteAverage || 0)] as const;
+        return [item.key, Number(m?.voteAverage || 0)] as const;
       } catch {
-        return [String(item.channel.id), 0] as const;
+        return [item.key, 0] as const;
       }
     })).then(entries => {
       if (alive) setRatings(prev => ({ ...prev, ...Object.fromEntries(entries) }));
     });
     return () => { alive = false; };
-  }, [sort, type, filtered.length, filtered.slice(0, 20).map(item => String(item.channel.id)).join('|')]);
+  }, [ratingTargets, type]);
 
-  const reset = () => { setQuery(''); setGroup(ALL_GROUPS); setSort('latest'); };
+  const reset = () => { setQueryInput(''); setQuery(''); setGroup(ALL_GROUP); setSort('latest'); };
   const activeGroup = groups.find(g => g.key === group) || groups[0];
   const activeSort = sortOptions.find(o => o.key === sort) || sortOptions[0];
-  const filtersActive = group !== ALL_GROUPS || sort !== 'latest' || query.trim() !== '';
+  const filtersActive = group !== ALL_GROUP || sort !== 'latest' || query.trim() !== '';
+
+  // First focus: the card the user left from, else the first card.
+  const focusIndex = useMemo(() => {
+    const key = remembered.focusKey;
+    const index = key ? filtered.findIndex(item => item.key === key) : -1;
+    return index >= 0 ? index : 0;
+    // Only for the first render of this page.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const [preferredIndex, setPreferredIndex] = useState(focusIndex);
+  const firstListRender = useRef(true);
+  useEffect(() => {
+    // After the list changes (category, sort, search) focus stays where the user
+    // is (toolbar / search); no card grabs it.
+    if (firstListRender.current) {
+      firstListRender.current = false;
+      return;
+    }
+    setPreferredIndex(-1);
+  }, [group, sort, query]);
+
+  const openItem = useCallback(
+    (item: CatalogItem) => {
+      screenMemory.set<LibraryMemory>(memoryKey, { focusKey: item.key });
+      onOpenPlayer(item.channel);
+    },
+    [memoryKey, onOpenPlayer],
+  );
+
+  const rowHeight = rowHeightFor(grid);
+  const getItemLayout = useCallback(
+    (_: unknown, index: number) => ({ length: rowHeight, offset: GRID_PAD_TOP + rowHeight * index, index }),
+    [rowHeight],
+  );
 
   return (
     <View style={[styles.screen, compact && styles.screenCompact, { backgroundColor: palette.background }]}>
-      <View style={[styles.header, compact && styles.headerCompact, { flexDirection: compact ? 'column' : rowDirection }]}>
-        <View style={[styles.headerTitleWrap, compact && styles.headerTitleWrapCompact]}>
-          <Text style={[styles.eyebrow, { color: palette.primaryText, textAlign: ar ? 'right' : 'left' }]}>{type === 'movie' ? 'MOVIES' : 'SERIES'}</Text>
-          <Text style={[styles.pageTitle, { color: palette.text, textAlign: ar ? 'right' : 'left' }]}>{title}</Text>
-          <Text style={[styles.pageSub, { color: palette.muted, textAlign: ar ? 'right' : 'left' }]}>{filtered.length.toLocaleString(ar ? 'ar-IQ' : 'en-US')} {type === 'movie' ? (ar ? 'فيلم متاح' : 'titles available') : (ar ? 'مسلسل متاح' : 'series available')}</Text>
-        </View>
-        <View style={[styles.headerTools, compact && styles.headerToolsCompact, { flexDirection: rowDirection }]}>
-          <View style={[styles.searchBox, compact && styles.searchBoxCompact, { flexDirection: rowDirection, backgroundColor: palette.surface, borderColor: searchFocused ? palette.focus : palette.border }]}>
-            <AppIcon name="search" size={18} color={palette.muted} />
-            <TextInput
-              value={query}
-              onChangeText={setQuery}
-              onFocus={() => setSearchFocused(true)}
-              onBlur={() => setSearchFocused(false)}
-              placeholder={ar ? `ابحث عن ${type === 'movie' ? 'فيلم' : 'مسلسل'}...` : `Search ${type === 'movie' ? 'movies' : 'series'}...`}
-              placeholderTextColor={palette.muted}
-              style={[styles.searchInput, { color: palette.text, textAlign: ar ? 'right' : 'left' }]}
-            />
+      <FocusRegion>
+        <View style={[styles.header, compact && styles.headerCompact, { flexDirection: compact ? 'column' : rowDirection }]}>
+          <View style={[styles.headerTitleWrap, compact && styles.headerTitleWrapCompact]}>
+            <Text style={[styles.eyebrow, { color: palette.primaryText, textAlign: ar ? 'right' : 'left' }]}>{type === 'movie' ? 'MOVIES' : 'SERIES'}</Text>
+            <Text style={[styles.pageTitle, { color: palette.text, textAlign: ar ? 'right' : 'left' }]}>{title}</Text>
+            <Text style={[styles.pageSub, { color: palette.muted, textAlign: ar ? 'right' : 'left' }]}>{filtered.length.toLocaleString(ar ? 'ar-IQ' : 'en-US')} {type === 'movie' ? (ar ? 'فيلم متاح' : 'titles available') : (ar ? 'مسلسل متاح' : 'series available')}</Text>
           </View>
-          <Pressable
-            focusable
-            accessibilityLabel={ar ? 'رجوع' : 'Back'}
-            onPress={onBack}
-            style={({ focused, pressed }) => [
-              styles.iconButton,
-              { backgroundColor: palette.surface, borderColor: palette.border },
-              focused && focusStyle(palette, SHASHTNA_THEME.focus.iconScale),
-              pressed && styles.pressed,
-            ]}
-          >
-            <View style={ar ? styles.flipX : undefined}>
-              <AppIcon name="back" size={19} color={palette.secondary} />
+          <View style={[styles.headerTools, compact && styles.headerToolsCompact, { flexDirection: rowDirection }]}>
+            <View style={[styles.searchBox, compact && styles.searchBoxCompact, { flexDirection: rowDirection, backgroundColor: palette.surface, borderColor: searchFocused ? palette.focus : palette.border }]}>
+              <AppIcon name="search" size={18} color={palette.muted} />
+              <TextInput
+                value={queryInput}
+                onChangeText={setQueryInput}
+                onSubmitEditing={() => setQuery(queryInput)}
+                onFocus={() => setSearchFocused(true)}
+                onBlur={() => setSearchFocused(false)}
+                placeholder={ar ? `ابحث عن ${type === 'movie' ? 'فيلم' : 'مسلسل'}...` : `Search ${type === 'movie' ? 'movies' : 'series'}...`}
+                placeholderTextColor={palette.muted}
+                returnKeyType="search"
+                style={[styles.searchInput, { color: palette.text, textAlign: ar ? 'right' : 'left' }]}
+              />
             </View>
-          </Pressable>
+            <Pressable
+              focusable
+              accessibilityLabel={ar ? 'رجوع' : 'Back'}
+              onPress={onBack}
+              style={({ focused, pressed }) => [
+                styles.iconButton,
+                { backgroundColor: palette.surface, borderColor: palette.border },
+                focused && focusStyle(palette, SHASHTNA_THEME.focus.iconScale),
+                pressed && styles.pressed,
+              ]}
+            >
+              <View style={ar ? styles.flipX : undefined}>
+                <AppIcon name="back" size={19} color={palette.secondary} />
+              </View>
+            </Pressable>
+          </View>
         </View>
-      </View>
 
-      <View style={[styles.toolbar, { flexDirection: rowDirection }]}>
-        <FilterButton
-          grow
-          caption={ar ? 'التصنيف' : 'Category'}
-          value={activeGroup.label}
-          count={activeGroup.count}
-          icon="grid"
-          active={group !== ALL_GROUPS}
-          onPress={() => setSheet('group')}
-          palette={palette}
-          ar={ar}
-        />
-        <FilterButton
-          grow={compact}
-          caption={ar ? 'الترتيب' : 'Sort by'}
-          value={activeSort.label}
-          icon="sliders"
-          active={sort !== 'latest'}
-          onPress={() => setSheet('sort')}
-          palette={palette}
-          ar={ar}
-        />
-        {filtersActive ? <ClearFiltersButton onPress={reset} palette={palette} ar={ar} /> : null}
-      </View>
+        <View style={[styles.toolbar, { flexDirection: rowDirection }]}>
+          <FilterButton
+            grow
+            caption={ar ? 'التصنيف' : 'Category'}
+            value={activeGroup.label}
+            count={activeGroup.count}
+            icon="grid"
+            active={group !== ALL_GROUP}
+            onPress={() => setSheet('group')}
+            palette={palette}
+            ar={ar}
+          />
+          <FilterButton
+            grow={compact}
+            caption={ar ? 'الترتيب' : 'Sort by'}
+            value={activeSort.label}
+            icon="sliders"
+            active={sort !== 'latest'}
+            onPress={() => setSheet('sort')}
+            palette={palette}
+            ar={ar}
+          />
+          {filtersActive ? <ClearFiltersButton onPress={reset} palette={palette} ar={ar} /> : null}
+        </View>
+      </FocusRegion>
 
       <OptionSheet
         visible={sheet === 'group'}
@@ -282,36 +346,40 @@ export default function MediaLibraryScreen({ type, title, channels, onOpenPlayer
         ar={ar}
       />
 
-      <View style={styles.gridArea} onLayout={e => setGridWidth(e.nativeEvent.layout.width)}>
-        {gridReady ? (
-          <FlatList
-            key={`grid-${grid.columns}`}
-            data={filtered}
-            keyExtractor={i => `${type}:${i.channel.id}`}
-            numColumns={grid.columns}
-            columnWrapperStyle={grid.columns > 1 ? [styles.gridRow, { gap: grid.gap, flexDirection: rowDirection }] : undefined}
-            contentContainerStyle={styles.grid}
-            showsVerticalScrollIndicator={false}
-            renderItem={({ item }) => (
-              <MediaCard
-                item={item}
-                type={type}
-                onPress={() => onOpenPlayer(item.channel)}
-                isFavorite={favoriteSet.has(`${type}:${item.channel.id}`)}
-                onToggleFavorite={onToggleFavorite}
-                palette={palette}
-                ar={ar}
-                grid={grid}
-              />
-            )}
-            ListEmptyComponent={<Empty type={type} palette={palette} ar={ar} />}
-            removeClippedSubviews
-            initialNumToRender={15}
-            maxToRenderPerBatch={10}
-            windowSize={7}
-          />
-        ) : null}
-      </View>
+      <FocusRegion style={styles.gridArea}>
+        <View style={styles.gridArea} onLayout={e => setGridWidth(e.nativeEvent.layout.width)}>
+          {gridReady ? (
+            <FlatList
+              key={`grid-${grid.columns}`}
+              data={filtered}
+              keyExtractor={i => i.key}
+              numColumns={grid.columns}
+              columnWrapperStyle={grid.columns > 1 ? [styles.gridRow, { gap: grid.gap, flexDirection: rowDirection }] : undefined}
+              contentContainerStyle={styles.grid}
+              showsVerticalScrollIndicator={false}
+              getItemLayout={getItemLayout}
+              initialScrollIndex={preferredIndex > 0 ? initialRowFor(preferredIndex, grid.columns) : undefined}
+              renderItem={({ item, index }) => (
+                <MediaCard
+                  item={item}
+                  type={type}
+                  onOpen={openItem}
+                  palette={palette}
+                  ar={ar}
+                  grid={grid}
+                  preferred={index === preferredIndex}
+                  memoryKey={memoryKey}
+                />
+              )}
+              ListEmptyComponent={<Empty type={type} palette={palette} ar={ar} />}
+              removeClippedSubviews
+              initialNumToRender={15}
+              maxToRenderPerBatch={10}
+              windowSize={7}
+            />
+          ) : null}
+        </View>
+      </FocusRegion>
     </View>
   );
 }
@@ -334,6 +402,11 @@ function Empty({ type, palette, ar }: { type: MediaType; palette: Palette; ar: b
 
 const T = SHASHTNA_THEME.typography;
 const GRID_PAD_X = 4;
+const GRID_PAD_TOP = 10;
+const ROW_GAP = 22;
+const META_LINE = 16;
+/** mediaName (10 + line) + mediaMeta (2 + line): fixed so every row has the same height. */
+const CARD_TEXT_HEIGHT = 10 + T.lineHeight.cardTitle + 2 + META_LINE;
 
 const styles = StyleSheet.create({
   screen: { flex: 1, paddingHorizontal: SHASHTNA_THEME.layout.contentX, paddingTop: 26 },
@@ -354,9 +427,9 @@ const styles = StyleSheet.create({
   searchInput: { flex: 1, fontFamily: SHASHTNA_FONT.sans, fontSize: 16, paddingVertical: 0 },
   toolbar: { alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 16, paddingHorizontal: 4 },
   gridArea: { flex: 1 },
-  grid: { paddingBottom: 40, paddingTop: 10, paddingHorizontal: GRID_PAD_X },
-  gridRow: { marginBottom: 22 },
-  cardWrap: { position: 'relative' },
+  grid: { paddingBottom: 40, paddingTop: GRID_PAD_TOP, paddingHorizontal: GRID_PAD_X },
+  gridRow: {},
+  cardWrap: { position: 'relative', marginBottom: ROW_GAP },
   posterFrame: { borderRadius: 16, overflow: 'hidden', borderWidth: 1 },
   posterImage: { width: '100%', height: '100%' },
   posterFallback: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 12, gap: 10, experimental_backgroundImage: 'linear-gradient(160deg, #13203A 0%, #0A101C 100%)' },
@@ -371,7 +444,7 @@ const styles = StyleSheet.create({
   favoriteRtl: { left: 8 },
   favoriteButtonActive: { backgroundColor: '#FF4D7A', borderColor: 'rgba(255,255,255,.4)' },
   mediaName: { fontSize: T.size.cardTitle, lineHeight: T.lineHeight.cardTitle, fontWeight: '800', marginTop: 10, paddingHorizontal: 2 },
-  mediaMeta: { fontSize: 12, marginTop: 2, fontWeight: '700', paddingHorizontal: 2 },
+  mediaMeta: { fontSize: 12, lineHeight: META_LINE, marginTop: 2, fontWeight: '700', paddingHorizontal: 2 },
   empty: { minHeight: 360, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 48 },
   emptyIcon: { width: 68, height: 68, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   emptyTitle: { fontSize: 20, fontWeight: '900', marginTop: 14 },

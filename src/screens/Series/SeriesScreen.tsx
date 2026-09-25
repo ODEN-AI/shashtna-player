@@ -1,5 +1,19 @@
-import React from 'react';
 import MediaLibraryScreen from '../../components/common/MediaLibraryScreen';
-import { M3UChannel } from '../../lib/m3u';
 import { useAppPreferences } from '../../design/AppPreferencesContext';
-export default function SeriesScreen(props:{channels:M3UChannel[];onOpenPlayer:(c:M3UChannel)=>void;onNavigate:(page:'home'|'live'|'movies'|'series'|'favorites'|'search'|'settings')=>void;onBack:()=>void;favoriteIds?:string[];onToggleFavorite?:(c:M3UChannel)=>void}){const { language } = useAppPreferences(); return <MediaLibraryScreen {...props} type="series" title={language === 'ar' ? 'المسلسلات' : 'Series'} />}
+import { Catalog } from '../../features/catalog/catalog';
+import { M3UChannel } from '../../lib/m3u';
+
+export default function SeriesScreen({ catalog, onOpenPlayer, onBack }: { catalog: Catalog; onOpenPlayer: (c: M3UChannel) => void; onBack: () => void }) {
+  const { language } = useAppPreferences();
+  return (
+    <MediaLibraryScreen
+      type="series"
+      title={language === 'ar' ? 'المسلسلات' : 'Series'}
+      items={catalog.series}
+      groups={catalog.seriesGroups}
+      itemsByGroup={catalog.seriesByGroup}
+      onOpenPlayer={onOpenPlayer}
+      onBack={onBack}
+    />
+  );
+}

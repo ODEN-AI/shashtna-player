@@ -1,10 +1,9 @@
-import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
   Image,
   Pressable,
   StyleSheet,
-  TVFocusGuideView,
   View,
 } from 'react-native';
 import { Text, TextInput } from '../../components/common/Typography';
@@ -16,11 +15,17 @@ import { useDeviceClass } from '../../design/device';
 import { focusStyle, Palette, usePalette } from '../../design/palette';
 import { SHASHTNA_FONT, SHASHTNA_THEME } from '../../design/theme';
 import { M3UChannel } from '../../lib/m3u';
+import { ALL_GROUP, Catalog, channelKey } from '../../features/catalog/catalog';
+import { createSearcher } from '../../features/catalog/search';
+import { toggleFavorite, useFavoriteKeys, useIsFavorite } from '../../features/favorites/favoritesStore';
+import { FocusRegion, initialRowFor, screenMemory } from '../../navigation/tvFocus';
+import { liveGridColumns } from '../../components/common/posterGrid';
 
 type Props = {
-  channels: M3UChannel[];
+  /** Built once per source; categories are Map lookups (see features/catalog). */
+  catalog: Catalog;
   /** `queue` is the list currently on screen; the player zaps through it. */
-  onOpenPlayer: (channel: M3UChannel, queue: M3UChannel[]) => void;
+  onOpenPlayer: (channel: M3UChannel, queue: readonly M3UChannel[]) => void;
   onBackHome: () => void;
   /** Pre-select a category (Home shortcut, or the one in use before opening the player). */
   initialGroup?: string | null;
@@ -32,7 +37,11 @@ type Props = {
 
 type Group = { key: string; label: string; count: number };
 
-const ALL = '__all__';
+const ALL = ALL_GROUP;
+/** Virtual category: the user's favorite channels (long-press a channel to add). */
+export const FAVORITES_GROUP = '__favorites__';
+const SEARCH_DEBOUNCE_MS = 150;
+type LiveMemory = { query: string };
 
 /**
  * Live TV browser.
@@ -43,17 +52,33 @@ const ALL = '__all__';
  * The visible, filtered list is what the player receives as its zapping queue,
  * so UP/DOWN in the player never jumps to a channel outside it.
  */
-export default function LiveScreen({ channels, onOpenPlayer, onBackHome, initialGroup, onGroupChange, focusChannelId }: Props) {
+export default function LiveScreen({ catalog, onOpenPlayer, onBackHome, initialGroup, onGroupChange, focusChannelId }: Props) {
+  const channels = catalog.live;
   const { language } = useAppPreferences();
   const palette = usePalette();
   const device = useDeviceClass();
   const ar = language === 'ar';
   const rowDirection = ar ? 'row-reverse' : 'row';
   const compact = device === 'phone';
-  const columns = device === 'tv' ? 3 : device === 'tablet' ? 2 : 1;
+  // Columns follow the width the channel grid really has (see liveGridColumns).
+  const [paneWidth, setPaneWidth] = useState(0);
+  const columns = liveGridColumns(paneWidth, device);
 
-  const [query, setQuery] = useState('');
+  const remembered = useRef(screenMemory.get<LiveMemory>('live')).current;
+  const [queryInput, setQueryInput] = useState(remembered.query || '');
+  const [query, setQuery] = useState(remembered.query || '');
   const [group, setGroup] = useState<string>(initialGroup || ALL);
+  const favoriteKeys = useFavoriteKeys();
+
+  useEffect(() => {
+    if (queryInput === query) return;
+    const timer = setTimeout(() => setQuery(queryInput), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [queryInput, query]);
+
+  useEffect(() => {
+    screenMemory.set<LiveMemory>('live', { query });
+  }, [query]);
   const [searchFocused, setSearchFocused] = useState(false);
   const [groupSheet, setGroupSheet] = useState(false);
 
@@ -69,26 +94,36 @@ export default function LiveScreen({ channels, onOpenPlayer, onBackHome, initial
     [onGroupChange],
   );
 
-  const groups = useMemo<Group[]>(() => {
-    const counts = new Map<string, number>();
-    for (const channel of channels) {
-      const name = String(channel.group || '').trim();
-      if (name) counts.set(name, (counts.get(name) || 0) + 1);
+  // Favorite channels in the order they were added (small list: keys -> channels).
+  const favoriteChannels = useMemo(() => {
+    const list: M3UChannel[] = [];
+    for (const key of favoriteKeys) {
+      if (!key.startsWith('live:')) continue;
+      const channel = catalog.byKey.get(key);
+      if (channel) list.push(channel);
     }
-    return [
-      { key: ALL, label: ar ? 'كل القنوات' : 'All channels', count: channels.length },
-      ...Array.from(counts, ([name, count]) => ({ key: name, label: name, count })),
-    ];
-  }, [channels, ar]);
+    return list;
+  }, [favoriteKeys, catalog]);
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return channels.filter(
-      c =>
-        (group === ALL || String(c.group || '').trim() === group) &&
-        (!q || c.name.toLowerCase().includes(q) || String(c.group || '').toLowerCase().includes(q)),
-    );
-  }, [channels, group, query]);
+  const groups = useMemo<Group[]>(
+    () => [
+      { key: ALL, label: ar ? 'كل القنوات' : 'All channels', count: channels.length },
+      { key: FAVORITES_GROUP, label: ar ? 'المفضلة' : 'Favorites', count: favoriteChannels.length },
+      ...catalog.liveGroups,
+    ],
+    [catalog, channels.length, favoriteChannels.length, ar],
+  );
+
+  // Category change = Map lookup; search runs on precomputed lowercase keys.
+  const searcher = useMemo(
+    () => createSearcher<M3UChannel>(c => catalog.liveSearch.get(String(c.id)) || ''),
+    [catalog],
+  );
+  const base = useMemo(
+    () => (group === ALL ? channels : group === FAVORITES_GROUP ? favoriteChannels : catalog.liveByGroup.get(group) || []),
+    [group, channels, favoriteChannels, catalog],
+  );
+  const filtered = useMemo(() => searcher(base, query), [searcher, base, query]);
 
   const openChannel = useCallback(
     (channel: M3UChannel) => onOpenPlayer(channel, filtered),
@@ -101,6 +136,16 @@ export default function LiveScreen({ channels, onOpenPlayer, onBackHome, initial
     [filtered, focusChannelId],
   );
   const rowHeight = SHASHTNA_THEME.layout.liveCardH + (columns === 1 ? 10 : 14);
+  // First focus: the channel just watched, otherwise the active category.
+  const focusGroupFirst = focusIndex < 0;
+  const getItemLayout = useCallback(
+    (_data: unknown, index: number) => ({ length: rowHeight, offset: rowHeight * index, index }),
+    [rowHeight],
+  );
+  const getGroupLayout = useCallback(
+    (_data: unknown, index: number) => ({ length: GROUP_ROW, offset: GROUP_ROW * index, index }),
+    [],
+  );
 
   const activeGroupLabel = groups.find(g => g.key === group)?.label || groups[0].label;
 
@@ -133,8 +178,10 @@ export default function LiveScreen({ channels, onOpenPlayer, onBackHome, initial
         >
           <AppIcon name="search" size={17} color={palette.muted} />
           <TextInput
-            value={query}
-            onChangeText={setQuery}
+            value={queryInput}
+            onChangeText={setQueryInput}
+            onSubmitEditing={() => setQuery(queryInput)}
+            returnKeyType="search"
             onFocus={() => setSearchFocused(true)}
             onBlur={() => setSearchFocused(false)}
             placeholder={ar ? 'ابحث عن قناة...' : 'Search channels...'}
@@ -171,8 +218,8 @@ export default function LiveScreen({ channels, onOpenPlayer, onBackHome, initial
       contentContainerStyle={styles.list}
       showsVerticalScrollIndicator={false}
       removeClippedSubviews
-      initialScrollIndex={focusIndex > 0 ? Math.floor(focusIndex / columns) : undefined}
-      getItemLayout={(_data, index) => ({ length: rowHeight, offset: rowHeight * index, index })}
+      initialScrollIndex={initialRowFor(focusIndex, columns)}
+      getItemLayout={getItemLayout}
       initialNumToRender={18}
       maxToRenderPerBatch={12}
       windowSize={7}
@@ -240,7 +287,7 @@ export default function LiveScreen({ channels, onOpenPlayer, onBackHome, initial
     <View style={[styles.screen, { backgroundColor: palette.background }]}>
       {header}
       <View style={[styles.body, { flexDirection: rowDirection }]}>
-        <TVFocusGuideView autoFocus style={[styles.groupPane, { backgroundColor: palette.surface, borderColor: palette.border }]}>
+        <FocusRegion style={[styles.groupPane, { backgroundColor: palette.surface, borderColor: palette.border }]}>
           <Text style={[styles.paneCaption, { color: palette.muted, textAlign: ar ? 'right' : 'left' }]}>
             {ar ? 'التصنيفات' : 'CATEGORIES'}
           </Text>
@@ -251,14 +298,25 @@ export default function LiveScreen({ channels, onOpenPlayer, onBackHome, initial
             initialNumToRender={14}
             windowSize={9}
             contentContainerStyle={styles.groupList}
+            initialScrollIndex={Math.max(0, groups.findIndex(g => g.key === group)) || undefined}
+            getItemLayout={getGroupLayout}
             renderItem={({ item }) => (
-              <GroupItem group={item} active={item.key === group} onSelect={selectGroup} ar={ar} palette={palette} />
+              <GroupItem
+                group={item}
+                active={item.key === group}
+                preferred={focusGroupFirst && item.key === group}
+                onSelect={selectGroup}
+                ar={ar}
+                palette={palette}
+              />
             )}
           />
-        </TVFocusGuideView>
-        <TVFocusGuideView autoFocus style={styles.channelPane}>
-          {channelList}
-        </TVFocusGuideView>
+        </FocusRegion>
+        <FocusRegion style={styles.channelPane}>
+          <View style={styles.channelPane} onLayout={e => setPaneWidth(e.nativeEvent.layout.width)}>
+            {channelList}
+          </View>
+        </FocusRegion>
       </View>
     </View>
   );
@@ -267,12 +325,14 @@ export default function LiveScreen({ channels, onOpenPlayer, onBackHome, initial
 const GroupItem = memo(function GroupItem({
   group,
   active,
+  preferred,
   onSelect,
   ar,
   palette,
 }: {
   group: Group;
   active: boolean;
+  preferred: boolean;
   onSelect: (key: string) => void;
   ar: boolean;
   palette: Palette;
@@ -280,6 +340,7 @@ const GroupItem = memo(function GroupItem({
   return (
     <Pressable
       focusable
+      hasTVPreferredFocus={preferred}
       accessibilityRole="button"
       accessibilityState={{ selected: active }}
       accessibilityLabel={group.label}
@@ -323,6 +384,8 @@ const ChannelCard = memo(function ChannelCard({
   preferred?: boolean;
 }) {
   const [failed, setFailed] = useState(false);
+  const key = channelKey(channel);
+  const favorite = useIsFavorite(key);
 
   return (
     <Pressable
@@ -330,7 +393,11 @@ const ChannelCard = memo(function ChannelCard({
       hasTVPreferredFocus={preferred}
       accessibilityRole="button"
       accessibilityLabel={channel.name}
+      accessibilityHint={favorite ? (ar ? 'اضغط مطولاً للإزالة من المفضلة' : 'Long-press to remove from favorites') : ar ? 'اضغط مطولاً للإضافة إلى المفضلة' : 'Long-press to add to favorites'}
       onPress={() => onOpen(channel)}
+      // Long-press OK (TV) / touch: add or remove the channel from favorites.
+      onLongPress={() => toggleFavorite(key)}
+      delayLongPress={600}
       style={({ focused, pressed }) => [
         styles.card,
         { flexDirection: ar ? 'row-reverse' : 'row', backgroundColor: palette.surface, borderColor: palette.border },
@@ -341,15 +408,18 @@ const ChannelCard = memo(function ChannelCard({
       <Text style={[styles.number, { color: palette.muted }]}>{number}</Text>
       <View style={styles.logoBox}>
         {channel.logo && !failed ? (
-          <Image source={{ uri: channel.logo }} style={styles.logo} onError={() => setFailed(true)} />
+          <Image source={{ uri: channel.logo }} style={styles.logo} resizeMethod="resize" onError={() => setFailed(true)} />
         ) : (
           <Text style={[styles.logoFallback, { color: palette.secondary }]}>{channel.name.trim().slice(0, 2).toUpperCase()}</Text>
         )}
       </View>
       <View style={styles.cardMain}>
-        <Text numberOfLines={1} style={[styles.name, { color: palette.text, textAlign: ar ? 'right' : 'left' }]}>
-          {channel.name}
-        </Text>
+        <View style={[styles.nameRow, { flexDirection: ar ? 'row-reverse' : 'row' }]}>
+          <Text numberOfLines={1} style={[styles.name, styles.nameFlex, { color: palette.text, textAlign: ar ? 'right' : 'left' }]}>
+            {channel.name}
+          </Text>
+          {favorite ? <AppIcon name="favorite" size={13} color="#FF4D7A" /> : null}
+        </View>
         <View style={[styles.metaRow, { flexDirection: ar ? 'row-reverse' : 'row' }]}>
           <View style={styles.liveDotSmall} />
           <Text numberOfLines={1} style={[styles.group, { color: palette.muted, textAlign: ar ? 'right' : 'left' }]}>
@@ -362,6 +432,9 @@ const ChannelCard = memo(function ChannelCard({
 });
 
 const T = SHASHTNA_THEME.typography;
+
+/** groupItem height (50) + list gap (4). */
+const GROUP_ROW = 54;
 
 const styles = StyleSheet.create({
   screen: { flex: 1, paddingHorizontal: SHASHTNA_THEME.layout.contentX, paddingTop: 24 },
@@ -404,6 +477,8 @@ const styles = StyleSheet.create({
   logoFallback: { fontSize: 16, fontWeight: '900' },
   cardMain: { flex: 1, minWidth: 0 },
   name: { fontSize: 16, lineHeight: 21, fontFamily: SHASHTNA_FONT.sans, fontWeight: '900' },
+  nameRow: { alignItems: 'center', gap: 6 },
+  nameFlex: { flex: 1 },
   metaRow: { alignItems: 'center', gap: 6, marginTop: 4 },
   liveDotSmall: { width: 6, height: 6, borderRadius: 3, backgroundColor: SHASHTNA_THEME.colors.live },
   group: { flex: 1, fontSize: 12, lineHeight: 16, fontWeight: '700' },
