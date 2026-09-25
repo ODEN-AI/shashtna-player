@@ -4,10 +4,9 @@ import {
   Image,
   Pressable,
   StyleSheet,
-  Text,
-  TextInput,
   View,
 } from 'react-native';
+import { Text, TextInput } from './Typography';
 import { ClearFiltersButton, FilterButton, FilterOption, OptionSheet } from '../filters/FilterControls';
 import { M3UChannel } from '../../lib/m3u';
 import { getTmdbMetadata } from '../../lib/tmdb';

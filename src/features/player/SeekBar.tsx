@@ -7,10 +7,10 @@ import {
   Platform,
   Pressable,
   StyleSheet,
-  Text,
   useTVEventHandler,
   View,
 } from 'react-native';
+import { Text } from '../../components/common/Typography';
 
 import { SHASHTNA_THEME } from '../../design/theme';
 import { usePalette } from '../../design/palette';

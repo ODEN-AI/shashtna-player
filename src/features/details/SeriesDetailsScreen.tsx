@@ -8,10 +8,10 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
   TVFocusGuideView,
   View,
 } from 'react-native';
+import { Text } from '../../components/common/Typography';
 
 import AppIcon from '../../components/common/AppIcon';
 import HScroll from '../../components/layout/HScroll';

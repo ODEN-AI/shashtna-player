@@ -5,10 +5,9 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
-  TextInput,
   View,
 } from 'react-native';
+import { Text, TextInput } from '../../components/common/Typography';
 
 import AppIcon, { AppIconName } from '../../components/common/AppIcon';
 import { ShellBackground } from '../../app/AppShell';

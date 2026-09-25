@@ -7,9 +7,9 @@ import {
   Platform,
   Pressable,
   StyleSheet,
-  Text,
   View,
 } from 'react-native';
+import { Text } from '../../components/common/Typography';
 
 import AppIcon from '../../components/common/AppIcon';
 import { BRAND, BRAND_ASSETS } from '../../design/brand';

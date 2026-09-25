@@ -13,9 +13,9 @@ import {
   Modal,
   Pressable,
   StyleSheet,
-  Text,
   View,
 } from 'react-native';
+import { Text } from '../../components/common/Typography';
 
 import Video, {
   VideoRef,

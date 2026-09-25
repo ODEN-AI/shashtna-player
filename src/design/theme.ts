@@ -140,15 +140,23 @@ export const SHASHTNA_THEME = {
   },
 } as const;
 
+/**
+ * App typeface: IBM Plex Sans Arabic (SIL OFL 1.1), bundled in
+ * android/app/src/main/res/font and registered in MainApplication under this name.
+ * One family carries both Arabic and Latin; weights 400/500/600/700 are real faces,
+ * heavier requested weights render with Bold.
+ */
+export const APP_FONT_FAMILY = 'IBM Plex Sans Arabic';
+
 export const SHASHTNA_FONT = {
-  sans: 'Thmanyah Sans',
-  display: 'Thmanyah Serif Display',
-  serifDisplay: 'Thmanyah Serif Display',
-  regular: 'Thmanyah Sans',
-  medium: 'Thmanyah Sans',
-  semibold: 'Thmanyah Sans',
-  bold: 'Thmanyah Sans',
-  black: 'Thmanyah Sans',
+  sans: APP_FONT_FAMILY,
+  display: APP_FONT_FAMILY,
+  serifDisplay: APP_FONT_FAMILY,
+  regular: APP_FONT_FAMILY,
+  medium: APP_FONT_FAMILY,
+  semibold: APP_FONT_FAMILY,
+  bold: APP_FONT_FAMILY,
+  black: APP_FONT_FAMILY,
 } as const;
 
 export type ShashtnaTheme = typeof SHASHTNA_THEME;

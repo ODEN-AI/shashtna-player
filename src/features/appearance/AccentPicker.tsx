@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Pressable, StyleProp, StyleSheet, Text, TextInput, TextStyle, View, ViewStyle } from 'react-native';
+import { Pressable, StyleProp, StyleSheet, TextStyle, View, ViewStyle } from 'react-native';
+import { Text, TextInput } from '../../components/common/Typography';
 
 import AppIcon from '../../components/common/AppIcon';
 import { Palette } from '../../design/palette';

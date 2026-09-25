@@ -4,10 +4,9 @@ import {
   Modal,
   Pressable,
   StyleSheet,
-  Text,
-  TextInput,
   View,
 } from 'react-native';
+import { Text, TextInput } from '../common/Typography';
 
 import AppIcon, { AppIconName } from '../common/AppIcon';
 import { useDeviceClass } from '../../design/device';

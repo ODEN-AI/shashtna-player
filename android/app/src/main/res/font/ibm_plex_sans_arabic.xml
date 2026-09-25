@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- IBM Plex Sans Arabic (SIL Open Font License 1.1, see licenses/IBMPlexSansArabic-OFL.txt).
+     Registered in MainApplication as "IBM Plex Sans Arabic"; fontWeight picks the
+     closest face (800/900 use Bold). -->
+<font-family xmlns:app="http://schemas.android.com/apk/res-auto">
+    <font app:fontStyle="normal" app:fontWeight="400" app:font="@font/ibm_plex_sans_arabic_regular" />
+    <font app:fontStyle="normal" app:fontWeight="500" app:font="@font/ibm_plex_sans_arabic_medium" />
+    <font app:fontStyle="normal" app:fontWeight="600" app:font="@font/ibm_plex_sans_arabic_semibold" />
+    <font app:fontStyle="normal" app:fontWeight="700" app:font="@font/ibm_plex_sans_arabic_bold" />
+</font-family>

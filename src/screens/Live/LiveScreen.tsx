@@ -4,11 +4,10 @@ import {
   Image,
   Pressable,
   StyleSheet,
-  Text,
-  TextInput,
   TVFocusGuideView,
   View,
 } from 'react-native';
+import { Text, TextInput } from '../../components/common/Typography';
 
 import AppIcon from '../../components/common/AppIcon';
 import { FilterButton, OptionSheet } from '../../components/filters/FilterControls';

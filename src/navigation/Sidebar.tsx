@@ -5,10 +5,10 @@ import {
   Image,
   Pressable,
   StyleSheet,
-  Text,
   TVFocusGuideView,
   View,
 } from 'react-native';
+import { AnimatedText, Text } from '../components/common/Typography';
 
 import AppIcon, { AppIconName } from '../components/common/AppIcon';
 import { BRAND, BRAND_ASSETS } from '../design/brand';
@@ -281,7 +281,7 @@ const RailButton = memo(function RailButton({
               }
             />
           </View>
-          <Animated.Text
+          <AnimatedText
             numberOfLines={1}
             style={[
               styles.label,
@@ -295,7 +295,7 @@ const RailButton = memo(function RailButton({
             ]}
           >
             {item.label}
-          </Animated.Text>
+          </AnimatedText>
         </>
       )}
     </Pressable>

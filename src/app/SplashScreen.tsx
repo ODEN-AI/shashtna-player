@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
-import { Animated, Easing, Image, StyleSheet, Text, View } from 'react-native';
+import { Animated, Easing, Image, StyleSheet, View } from 'react-native';
+import { AnimatedText, Text } from '../components/common/Typography';
 
 import { BRAND, BRAND_ASSETS } from '../design/brand';
 import { SHASHTNA_FONT, SHASHTNA_THEME } from '../design/theme';
@@ -41,7 +42,7 @@ export default function SplashScreen({ onFinish }: Props) {
         <Image source={BRAND_ASSETS.logo} style={styles.logo} resizeMode="contain" />
         <Text style={styles.name}>{BRAND.nameInside}</Text>
       </Animated.View>
-      <Animated.Text style={[styles.credit, { opacity: intro }]}>{BRAND.developerCredit}</Animated.Text>
+      <AnimatedText style={[styles.credit, { opacity: intro }]}>{BRAND.developerCredit}</AnimatedText>
     </Animated.View>
   );
 }

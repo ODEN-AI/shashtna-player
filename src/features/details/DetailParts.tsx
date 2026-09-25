@@ -1,5 +1,6 @@
 import React, { memo, useState } from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, View } from 'react-native';
+import { Text } from '../../components/common/Typography';
 
 import AppIcon, { AppIconName } from '../../components/common/AppIcon';
 import { ShellBackground } from '../../app/AppShell';

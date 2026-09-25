@@ -17,9 +17,9 @@ import {
   Pressable,
   StatusBar,
   StyleSheet,
-  Text,
   View,
 } from 'react-native';
+import { Text } from './src/components/common/Typography';
 
 import PlayerScreen from './src/screens/Player/PlayerScreen';
 import LiveScreen from './src/screens/Live/LiveScreen';

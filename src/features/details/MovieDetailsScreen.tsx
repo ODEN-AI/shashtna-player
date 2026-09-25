@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, BackHandler, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, BackHandler, ScrollView, StyleSheet, View } from 'react-native';
+import { Text } from '../../components/common/Typography';
 
 import { useAppPreferences } from '../../design/AppPreferencesContext';
 import { useDeviceClass } from '../../design/device';
