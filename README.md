@@ -1,3 +1,13 @@
+# Shashtna Player
+
+Android TV / mobile IPTV player, built in two editions from this codebase:
+**Shashtna Player** (Live TV, Movies, Series) and **Shashtna Player Lite**
+(Live TV only). Build commands, APK paths, IPTV connection options (account,
+M3U link, M3U file), performance notes and TV remote testing:
+[docs/FULL_AND_LITE.md](docs/FULL_AND_LITE.md).
+
+---
+
 This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
 
 # Getting Started
