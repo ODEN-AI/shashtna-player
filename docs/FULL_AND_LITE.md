@@ -9,8 +9,10 @@ One codebase, two Android apps.
 | applicationId | `com.shashtnaplayer` (unchanged) | `com.shashtnaplayer.lite` |
 | Launcher name | Shashtna Player | Shashtna Player Lite |
 | JS entry | `index.js` → `App.tsx` | `index.lite.js` → `src/variants/lite/LiteApp.tsx` |
-| Pages | Home, Live TV, Movies, Series, Favorites, Settings | Live TV (start page), Favorites, Settings |
+| Pages | Home, Live TV, Movies, Series, Favorites, Settings | البث المباشر (Live TV, start page), الإعدادات (Settings) — nothing else |
 | Xtream requests on load | 6 (live, VOD, series + categories) | 2 (live + live categories) |
+| Favorites | Favorites page + Favorites category in Live TV | channel-level only (long-press OK, heart on the card); no page or category |
+| Stored library cache | live, movies, series | live rows only |
 
 The two apps have different applicationIds, so both can be installed on the
 same TV box or phone at the same time, each with its own login, cache and
@@ -39,6 +41,36 @@ Metro for its own entry module (`BuildConfig.JS_MAIN_MODULE`), so one Metro
 server serves both. Release builds embed the bundle; the Lite release bundle
 is built from `index.lite.js` (see `android/app/build.gradle`).
 
+### Lite release bundle: why it once contained the Full app
+
+An installed Lite release APK used to open the Full UI (Home, Movies, Series,
+ads). The React Native Gradle plugin registers `createBundle<Variant>JsAndAssets`
+inside its own `androidComponents.onVariants` callback, and the `register`
+action sets `entryFile` to `index.js`. The old Lite override was a
+`tasks.matching { … }.configureEach { entryFile.set(…) }` block: Gradle runs
+container-level `configureEach` actions *before* the action passed to
+`register`, so the plugin overwrote the override and the Lite release bundle
+was built from `index.js` → `App.tsx`. (Debug builds were unaffected: they ask
+Metro for `JS_MAIN_MODULE`, which is why the bug only showed in release APKs.)
+
+The fix sets the entry from a later `androidComponents.onVariants` callback
+with `tasks.named(…).configure { … }`, which runs after the plugin's action.
+A build guard then makes a wrong bundle impossible to ship:
+
+- before bundling, each `createBundle(Full|Lite)*JsAndAssets` task fails if its
+  entry is not `index.js` (Full) / `index.lite.js` (Lite);
+- after bundling, it fails unless the bundle contains its own edition marker
+  (`shashtna-edition:full` in `App.tsx`, `shashtna-edition:lite` in
+  `LiteApp.tsx`) and not the other one.
+
+A successful release build prints e.g.
+`createBundleLiteReleaseJsAndAssets: verified index.android.bundle (entry index.lite.js, marker shashtna-edition:lite)`.
+
+To check an APK by hand: `aapt dump badging app-lite-release.apk` (package
+`com.shashtnaplayer.lite`, label `Shashtna Player Lite`), then unzip
+`assets/index.android.bundle` and search it for `shashtna-edition:lite`
+(Hermes bytecode keeps string literals, so a plain byte search works).
+
 Install side by side:
 
 ```
@@ -48,12 +80,28 @@ adb install -r android/app/build/outputs/apk/lite/debug/app-lite-debug.apk
 
 ### What Lite does not contain
 
-Lite's JS bundle is built from `index.lite.js`, which never imports Home,
-Movies, Series, the movie/series detail pages, the library grid, TMDB or the
-advertisement carousel, so that code and the banner artwork (~3.4 MB) are not
-in the Lite APK. The player receives the detail pages as a prop from the Full
-app only. `__tests__/liteBoundaries.test.ts` walks the import graph from
-`index.lite.js` and fails if a VOD module becomes reachable.
+Lite's JS bundle is built from `index.lite.js` → `LiteApp.tsx`, which never
+imports `App.tsx`, Home, Movies, Series, the Favorites page, the movie/series
+detail pages, the library grid, TMDB, the advertisement carousel, Continue
+Watching, the Xtream VOD module (`src/lib/xtreamVod.ts`) or movie/series
+indexing (`src/features/catalog/mediaCatalog.ts`). None of that code, and none
+of the banner artwork, is in the Lite APK.
+
+The Full root injects its VOD pieces through an `Edition` object
+(`src/app/edition.ts`): `loadVod` (Xtream movie + series requests),
+`indexMedia` (movie/series cards) and, via `src/features/player/resumeRegistry.ts`,
+the Continue Watching store. The Lite edition is `{ id: 'lite', liveOnly: true }`,
+so the shared code has nothing VOD-related to call. The player receives the
+detail pages as a prop from the Full app only.
+
+Checks: `__tests__/liteBoundaries.test.ts` walks the import graph from
+`index.lite.js` and fails if any of those modules becomes reachable;
+`__tests__/liteApp.test.tsx` renders the Lite root (login without Movies/Series,
+Live TV right after connecting, only Live TV + Settings in the sidebar).
+
+Measured on the production Metro bundles (source maps): Lite has 48 app
+modules, Full 70; Lite's embedded bundle is ~3.06 MB JS / ~2.00 MB Hermes
+bytecode vs ~3.30 MB / ~2.17 MB for Full.
 
 Shared by both: connection screen, session/restore, catalog indexes, M3U and
 Xtream parsing, player (zapping, audio/subtitles, retry, diagnostics),
@@ -150,8 +198,9 @@ Rules (see `src/navigation/tvFocus.tsx`):
 - **Dialogs trap focus** and focus the selected option first; BACK closes them.
 - **BACK**: player → the page it was opened from; any page → the start page
   (Home in Full, Live TV in Lite); start page → exit.
-- **Channels**: long-press OK on a channel adds/removes it from Favorites; the
-  Favorites category in Live TV and the Favorites page zap within favorites.
+- **Channels**: long-press OK on a channel adds/removes it from Favorites (a
+  heart marks it). In Full, the Favorites category in Live TV and the
+  Favorites page zap within favorites; Lite has neither.
 
 ### Testing on a device
 
@@ -168,4 +217,5 @@ On an Android TV / TV box (or the Android TV emulator), with the remote or
    change category: focus stays in the category pane.
 5. Long-press OK on a channel, then open the Favorites category.
 6. Open the category sheet: the selected category is focused; BACK closes it.
-7. Repeat in Shashtna Player Lite.
+7. Repeat in Shashtna Player Lite: the sidebar has only البث المباشر and
+   الإعدادات, and Live TV opens right after signing in.

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { buildCatalogAsync, Catalog, emptyCatalog } from '../features/catalog/catalog';
+import type { Edition } from './edition';
 import { clearLibraryCache, loadLibraryCache, saveLibraryCache } from '../features/catalog/catalogCache';
 import { clearConnectionSource, loadConnectionSource, saveConnectionSource } from '../lib/connectionSession';
 import {
@@ -33,7 +34,8 @@ export type LibrarySession = {
   refresh: () => Promise<void>;
 };
 
-export function useLibrarySession({ liveOnly }: { liveOnly: boolean }): LibrarySession {
+export function useLibrarySession(edition: Edition): LibrarySession {
+  const { liveOnly, loadVod, indexMedia } = edition;
   const [status, setStatus] = useState<LibraryStatus>('restoring');
   const [catalog, setCatalog] = useState<Catalog>(emptyCatalog);
   const [source, setSource] = useState('');
@@ -43,7 +45,7 @@ export function useLibrarySession({ liveOnly }: { liveOnly: boolean }): LibraryS
     async (channels: M3UChannel[], nextSource: string, persist: boolean) => {
       const run = ++generation.current;
       setStatus('indexing');
-      const next = await buildCatalogAsync(channels, { liveOnly });
+      const next = await buildCatalogAsync(channels, { liveOnly, indexMedia });
       if (run !== generation.current) return;
       if (!next.all.length || (liveOnly && !next.live.length)) {
         setStatus('disconnected');
@@ -53,9 +55,10 @@ export function useLibrarySession({ liveOnly }: { liveOnly: boolean }): LibraryS
       setSource(nextSource);
       setStatus('ready');
       const session = getXtreamSessionFromSource(nextSource);
-      if (persist && session) void saveLibraryCache(nextSource, session, channels, liveOnly);
+      // Lite persists the live channels only, whatever the source contained.
+      if (persist && session) void saveLibraryCache(nextSource, session, liveOnly ? next.live : channels, liveOnly);
     },
-    [liveOnly],
+    [liveOnly, indexMedia],
   );
 
   useEffect(() => {
@@ -75,7 +78,7 @@ export function useLibrarySession({ liveOnly }: { liveOnly: boolean }): LibraryS
           await install(cached, saved, false);
           return;
         }
-        const channels = await downloadAndParseM3U(saved, undefined, undefined, { liveOnly });
+        const channels = await downloadAndParseM3U(saved, undefined, undefined, { liveOnly, loadVod });
         if (!alive) return;
         await install(channels, saved, true);
       } catch (error) {
@@ -86,7 +89,7 @@ export function useLibrarySession({ liveOnly }: { liveOnly: boolean }): LibraryS
     return () => {
       alive = false;
     };
-  }, [install, liveOnly]);
+  }, [install, liveOnly, loadVod]);
 
   const connect = useCallback(
     async (channels: M3UChannel[], nextSource: string) => {
@@ -110,14 +113,14 @@ export function useLibrarySession({ liveOnly }: { liveOnly: boolean }): LibraryS
     if (!source) return;
     setStatus('restoring');
     try {
-      const channels = await downloadAndParseM3U(source, undefined, undefined, { liveOnly });
+      const channels = await downloadAndParseM3U(source, undefined, undefined, { liveOnly, loadVod });
       await install(channels, source, true);
     } catch (error) {
       console.warn('[Shashtna] Library refresh failed:', error);
       // Keep the library that was already loaded.
       setStatus('ready');
     }
-  }, [install, liveOnly, source]);
+  }, [install, liveOnly, loadVod, source]);
 
   return { status, catalog, source, connect, disconnect, refresh };
 }

@@ -3,7 +3,7 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Text } from '../../components/common/Typography';
 import AppIcon from '../../components/common/AppIcon';
 import { SHASHTNA_FONT, SHASHTNA_THEME } from '../../design/theme';
-import { BRAND } from '../../design/brand';
+import { BRAND, BRAND_LITE } from '../../design/brand';
 import { usePalette } from '../../design/palette';
 import { useAppPreferences } from '../../design/AppPreferencesContext';
 import AccentPicker from '../../features/appearance/AccentPicker';
@@ -26,6 +26,8 @@ type Props = {
   onChangeSource: () => void;
   /** Re-download the library (it is cached between launches). */
   onRefreshLibrary?: () => void;
+  /** Shashtna Player Lite: Live TV only, so texts don't mention movies/series. */
+  liveOnly?: boolean;
   onBack: () => void;
 };
 
@@ -42,6 +44,7 @@ export default function SettingsScreen({
   setThemeMode,
   onChangeSource,
   onRefreshLibrary,
+  liveOnly = false,
   onBack,
 }: Props) {
   const ar = language === 'ar';
@@ -78,7 +81,7 @@ export default function SettingsScreen({
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.headerRow}>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.eyebrow, { color: palette.primary }]}>{BRAND.nameInside}</Text>
+            <Text style={[styles.eyebrow, { color: palette.primary }]}>{liveOnly ? BRAND_LITE.nameInside : BRAND.nameInside}</Text>
             <Text style={[styles.title, { color: palette.text }]}>{ar ? 'الإعدادات' : 'Settings'}</Text>
             <Text style={[styles.description, { color: palette.secondary }]}>{ar ? 'تحكم بتجربة المشاهدة والتشغيل من مكان واحد.' : 'Control playback and viewing preferences from one place.'}</Text>
           </View>
@@ -119,7 +122,7 @@ export default function SettingsScreen({
 
         <View style={[styles.section, { borderColor: palette.border, backgroundColor: palette.surfaceSoft }]}>
           <Text style={[styles.sectionTitle, { color: palette.text }]}>{ar ? 'جودة البث الافتراضية' : 'Default stream quality'}</Text>
-          <Text style={[styles.sectionSub, { color: palette.muted }]}>{ar ? 'تُستخدم للبث المباشر والأفلام والمسلسلات عند توفر الجودة المطلوبة.' : 'Used for live TV, movies, and series when the source provides the selected quality.'}</Text>
+          <Text style={[styles.sectionSub, { color: palette.muted }]}>{liveOnly ? (ar ? 'تُستخدم للبث المباشر عند توفر الجودة المطلوبة.' : 'Used for live TV when the source provides the selected quality.') : ar ? 'تُستخدم للبث المباشر والأفلام والمسلسلات عند توفر الجودة المطلوبة.' : 'Used for live TV, movies, and series when the source provides the selected quality.'}</Text>
           <View style={styles.qualityGrid}>
             {qualities.map(([value,title,sub])=>(
               <Pressable key={value} focusable onPress={()=>setPreferredQuality(value)} style={({focused})=>[styles.qualityCard,{borderColor: palette.border,backgroundColor:palette.surface},preferredQuality===value&&{borderColor:palette.primary,backgroundColor:palette.primarySoft},focused&&styles.focus]}>

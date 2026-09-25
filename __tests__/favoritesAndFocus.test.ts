@@ -5,7 +5,7 @@ import {
   loadFavorites,
   toggleFavorite,
 } from '../src/features/favorites/favoritesStore';
-import { liveGridColumns, MIN_LIVE_CARD_WIDTH } from '../src/components/common/posterGrid';
+import { liveGridColumns, MIN_LIVE_CARD_WIDTH } from '../src/screens/Live/liveGrid';
 import { initialRowFor, screenMemory } from '../src/navigation/tvFocus';
 import ReactNativeBlobUtil from 'react-native-blob-util';
 

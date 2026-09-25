@@ -13,10 +13,19 @@ import { AppIconName } from './src/components/common/AppIcon';
 import { AppLanguage, AppPreferencesProvider } from './src/design/AppPreferencesContext';
 import { SHASHTNA_THEME } from './src/design/theme';
 import { Advertisement } from './src/features/ads/types';
-import { ContinueWatchingEntry } from './src/features/continueWatching/continueWatchingStore';
+import {
+  ContinueWatchingEntry,
+  ensureContinueWatchingLoaded,
+  getResumePosition,
+  recordProgress,
+} from './src/features/continueWatching/continueWatchingStore';
+import { setPlaybackResumeStore } from './src/features/player/resumeRegistry';
 import MovieDetailsScreen from './src/features/details/MovieDetailsScreen';
 import SeriesDetailsScreen from './src/features/details/SeriesDetailsScreen';
-import { getSeriesDetails, getSeriesFirstEpisode, M3UChannel } from './src/lib/m3u';
+import { M3UChannel } from './src/lib/m3u';
+import { getSeriesDetails, getSeriesFirstEpisode, loadXtreamVod } from './src/lib/xtreamVod';
+import type { Edition } from './src/app/edition';
+import { indexMedia } from './src/features/catalog/mediaCatalog';
 import Sidebar from './src/navigation/Sidebar';
 import { screenMemory } from './src/navigation/tvFocus';
 import ConnectionScreen from './src/screens/Connection/ConnectionScreen';
@@ -41,6 +50,15 @@ type NavItem = { id: Page; label: string; icon: AppIconName };
 
 const DETAIL_SCREENS: PlayerDetailScreens = { Movie: MovieDetailsScreen, Series: SeriesDetailsScreen };
 
+/** Found in the embedded bundle by the Gradle check; identifies this root. */
+export const EDITION_MARKER = 'shashtna-edition:full';
+
+// Movies and episodes resume where they stopped (Full only; Lite registers nothing).
+setPlaybackResumeStore({ ensureLoaded: ensureContinueWatchingLoaded, getResumePosition, recordProgress });
+
+/** Full edition: live + movies + series. */
+const FULL_EDITION: Edition = { id: 'full', liveOnly: false, loadVod: loadXtreamVod, indexMedia };
+
 function getNavItems(language: AppLanguage): NavItem[] {
   const ar = language === 'ar';
   return [
@@ -56,7 +74,7 @@ function getNavItems(language: AppLanguage): NavItem[] {
 function AppContent() {
   const preferences = usePreferencesState();
   const { language, setLanguage, themeMode, setThemeMode } = preferences;
-  const library = useLibrarySession({ liveOnly: false });
+  const library = useLibrarySession(FULL_EDITION);
   const { catalog } = library;
 
   const [page, setPage] = useState<Page>('home');
@@ -177,7 +195,7 @@ function AppContent() {
       <AppPreferencesProvider value={preferences}>
         <View style={styles.container}>
           <StatusBar barStyle="light-content" backgroundColor="#050C18" />
-          <ConnectionScreen onConnected={library.connect} />
+          <ConnectionScreen onConnected={library.connect} edition={FULL_EDITION} />
         </View>
       </AppPreferencesProvider>
     );
@@ -216,6 +234,7 @@ function AppContent() {
         initialGroup={liveInitialGroup}
         onGroupChange={setLiveInitialGroup}
         focusChannelId={lastLiveChannelId}
+        favoritesFilter
       />
     );
   } else if (page === 'movies') {
@@ -278,7 +297,7 @@ function App() {
   const [splashDone, setSplashDone] = useState(false);
   const finishSplash = useCallback(() => setSplashDone(true), []);
   return (
-    <View style={styles.root}>
+    <View style={styles.root} testID={EDITION_MARKER}>
       <AppContent />
       {splashDone ? null : <SplashScreen onFinish={finishSplash} />}
     </View>

@@ -1,6 +1,11 @@
 import ReactNativeBlobUtil from 'react-native-blob-util';
 
-import { ALL_GROUP, buildCatalog, buildCatalogAsync, cleanMediaTitle } from '../src/features/catalog/catalog';
+import { ALL_GROUP, buildCatalog as buildCatalogCore, buildCatalogAsync as buildCatalogAsyncCore, CatalogOptions } from '../src/features/catalog/catalog';
+import { cleanMediaTitle, indexMedia } from '../src/features/catalog/mediaCatalog';
+
+// Full edition catalog (with movie/series indexing), as App.tsx builds it.
+const buildCatalog = (list: M3UChannel[], options: CatalogOptions = {}) => buildCatalogCore(list, { indexMedia, ...options });
+const buildCatalogAsync = (list: M3UChannel[], options: CatalogOptions & { chunk?: number } = {}) => buildCatalogAsyncCore(list, { indexMedia, ...options });
 import { CACHE_TTL_MS, fingerprint, fromRows, loadLibraryCache, saveLibraryCache, toRows } from '../src/features/catalog/catalogCache';
 import { createSearcher, sortedByTitle } from '../src/features/catalog/search';
 import { M3UChannel } from '../src/lib/m3u';

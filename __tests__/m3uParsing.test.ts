@@ -163,3 +163,96 @@ describe('Xtream loading for Lite', () => {
     expect(channels[0]).toMatchObject({ contentType: 'live', group: 'عام', url: 'http://srv:8080/live/u/p/7.ts' });
   });
 });
+
+describe('Xtream: Lite is live-only, Full keeps VOD', () => {
+  const originalFetch = globalThis.fetch;
+  const SOURCE = 'http://srv:8080/get.php?username=u&password=p&type=m3u_plus';
+  let actions: string[] = [];
+  const BODIES: Record<string, unknown[]> = {
+    get_live_categories: [{ category_id: '1', category_name: 'عام' }],
+    get_live_streams: [{ stream_id: 7, name: 'قناة', category_id: '1' }],
+    get_vod_categories: [{ category_id: '2', category_name: 'أفلام' }],
+    get_vod_streams: [{ stream_id: 8, name: 'فيلم', category_id: '2', container_extension: 'mp4' }],
+    get_series_categories: [{ category_id: '3', category_name: 'مسلسلات' }],
+    get_series: [{ series_id: 9, name: 'مسلسل', category_id: '3' }],
+  };
+  beforeEach(() => {
+    actions = [];
+    globalThis.fetch = jest.fn(async (url: string) => {
+      const action = /action=([a-z_]+)/.exec(url)?.[1] || '';
+      actions.push(action);
+      return { ok: true, json: async () => BODIES[action] || [] } as any;
+    }) as any;
+  });
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it('the Lite edition (no VOD loader) makes no movie or series request', async () => {
+    const channels = await downloadAndParseM3U(SOURCE, undefined, undefined, { liveOnly: true });
+    expect(actions.sort()).toEqual(['get_live_categories', 'get_live_streams']);
+    expect(channels.map(c => c.contentType)).toEqual(['live']);
+  });
+
+  it('without a VOD loader even a non-liveOnly load stays live (VOD code lives only in the Full bundle)', async () => {
+    const channels = await downloadAndParseM3U(SOURCE);
+    expect(actions.sort()).toEqual(['get_live_categories', 'get_live_streams']);
+    expect(channels.every(c => c.contentType === 'live')).toBe(true);
+  });
+
+  it('the Full edition still loads movies and series', async () => {
+    const { loadXtreamVod } = require('../src/lib/xtreamVod');
+    const channels = await downloadAndParseM3U(SOURCE, undefined, undefined, { loadVod: loadXtreamVod });
+    expect(actions.sort()).toEqual([
+      'get_live_categories',
+      'get_live_streams',
+      'get_series',
+      'get_series_categories',
+      'get_vod_categories',
+      'get_vod_streams',
+    ]);
+    expect(new Set(channels.map(c => c.contentType))).toEqual(new Set(['live', 'movie', 'series']));
+  });
+});
+
+describe('Lite storage keeps no VOD', () => {
+  const { buildCatalog } = require('../src/features/catalog/catalog');
+  const { saveLibraryCache } = require('../src/features/catalog/catalogCache');
+  const { indexMedia } = require('../src/features/catalog/mediaCatalog');
+
+  beforeEach(() => files.clear());
+
+  it('a plain M3U playlist in Lite yields a live-only catalog', () => {
+    const channels = parseInChunks(PLAYLIST, 5, { liveOnly: true });
+    expect(channels.length).toBeGreaterThan(0);
+    expect(channels.every((c: any) => c.contentType === 'live')).toBe(true);
+    const catalog = buildCatalog(channels, { liveOnly: true });
+    expect(catalog.movies).toEqual([]);
+    expect(catalog.series).toEqual([]);
+    expect(catalog.all.every((c: any) => c.contentType === 'live')).toBe(true);
+  });
+
+  it('Lite indexing drops VOD rows even if a mixed list reaches it; Full indexes them', () => {
+    const mixed = parseInChunks(PLAYLIST, PLAYLIST.length);
+    expect(mixed.some((c: any) => c.contentType !== 'live')).toBe(true);
+    const lite = buildCatalog(mixed, { liveOnly: true });
+    expect([...lite.byKey.keys()].every(k => k.startsWith('live:'))).toBe(true);
+    expect(lite.movies.length + lite.series.length).toBe(0);
+    const full = buildCatalog(mixed, { indexMedia });
+    expect(full.movies.length).toBeGreaterThan(0);
+    expect(full.series.length).toBeGreaterThan(0);
+  });
+
+  it('the Lite library cache on disk holds live rows only', async () => {
+    const mixed = parseInChunks(PLAYLIST, PLAYLIST.length);
+    const lite = buildCatalog(mixed, { liveOnly: true });
+    // What useLibrarySession persists for Lite: the catalog's live channels.
+    await saveLibraryCache('http://srv/get.php?username=u&password=p', { baseUrl: 'http://srv', username: 'u', password: 'p' }, lite.live, true);
+    const stored = [...files.entries()].find(([key]) => key.endsWith('shashtna-library-cache.json'));
+    expect(stored).toBeDefined();
+    const rows = JSON.parse(stored![1]).rows as unknown[][];
+    expect(rows.length).toBe(lite.live.length);
+    expect(rows.every(r => r[0] === 0)).toBe(true); // 0 = live
+    expect(stored![1]).not.toMatch(/movie|series|الرسالة|باب الحارة/);
+  });
+});

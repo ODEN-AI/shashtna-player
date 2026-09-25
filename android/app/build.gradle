@@ -101,11 +101,51 @@ android {
     }
 }
 
-// Release (bundled) builds of the Lite edition start from index.lite.js, so the
-// Lite APK's JS bundle contains no Movies/Series screens at all. Debug builds
-// load the same module from Metro (BuildConfig.JS_MAIN_MODULE in MainApplication).
-tasks.matching { it.name.startsWith("createBundleLite") && it.name.endsWith("JsAndAssets") }.configureEach {
-    it.entryFile.set(file("../../index.lite.js"))
+// ---------------------------------------------------------------------------
+// Edition JS entry: Full bundles index.js, Lite bundles index.lite.js.
+//
+// The React Native plugin registers createBundle<Variant>JsAndAssets from its
+// own androidComponents.onVariants callback and sets entryFile to index.js in
+// the task's register() action. That action runs AFTER any container-wide
+// tasks.matching{}.configureEach{} registered here earlier, so setting the
+// entry that way (as done before) was silently overwritten and the Lite
+// release APK embedded the Full app. The entry is now set from an onVariants
+// callback registered after the plugin's, via tasks.named().configure(), which
+// runs after the plugin's register() action.
+androidComponents {
+    onVariants(selector().all()) { variant ->
+        if (variant.flavorName != "lite") return
+        def taskName = "createBundle${variant.name.substring(0, 1).toUpperCase()}${variant.name.substring(1)}JsAndAssets"
+        // Debuggable variants have no bundle task: they load index.lite from Metro.
+        if (!tasks.names.contains(taskName)) return
+        tasks.named(taskName).configure { t -> t.entryFile.set(file("../../index.lite.js")) }
+    }
+}
+
+// Build-time guard: a bundle task fails the build if its entry file is not the
+// edition's entry, or if the finished bundle does not carry its own edition
+// marker (EDITION_MARKER in App.tsx / LiteApp.tsx) or carries the other one.
+// A Lite APK with the Full app inside can therefore never be produced silently.
+tasks.matching { it.name ==~ /createBundle(Full|Lite)\w*JsAndAssets/ }.configureEach { t ->
+    def lite = t.name.startsWith("createBundleLite")
+    def expectedEntry = lite ? "index.lite.js" : "index.js"
+    def ownMarker = lite ? "shashtna-edition:lite" : "shashtna-edition:full"
+    def otherMarker = lite ? "shashtna-edition:full" : "shashtna-edition:lite"
+    t.doFirst {
+        def entry = t.entryFile.get().asFile.name
+        if (entry != expectedEntry) {
+            throw new GradleException("${t.name}: JS entry is ${entry}, expected ${expectedEntry}")
+        }
+    }
+    t.doLast {
+        def bundle = new File(t.jsBundleDir.get().asFile, t.bundleAssetName.get())
+        def content = new String(bundle.bytes, "ISO-8859-1")
+        if (!content.contains(ownMarker) || content.contains(otherMarker)) {
+            throw new GradleException("${t.name}: ${bundle} is not the ${lite ? 'Lite' : 'Full'} bundle " +
+                "(expected marker ${ownMarker}, must not contain ${otherMarker})")
+        }
+        logger.lifecycle("${t.name}: verified ${bundle.name} (entry ${expectedEntry}, marker ${ownMarker})")
+    }
 }
 
 // Keep `gradlew clean` working with autolinked New Architecture libraries.

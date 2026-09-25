@@ -36,7 +36,7 @@ import {
   ensureContinueWatchingLoaded,
   getResumePosition,
   recordProgress,
-} from '../../features/continueWatching/continueWatchingStore';
+} from '../../features/player/resumeRegistry';
 
 type PlayerScreenProps = {
   channel: M3UChannel;

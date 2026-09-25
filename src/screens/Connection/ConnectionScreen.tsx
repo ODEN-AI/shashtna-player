@@ -20,14 +20,15 @@ import { buildXtreamM3UUrl, downloadAndParseM3U, M3UChannel } from '../../lib/m3
 import { describeConnectionError, ValidationError } from './connectionErrors';
 import { describeServerUrlProblem, normalizeServerUrl, validateServerUrl } from '../../lib/serverUrl';
 import { looksLikePlaylistName, PickedPlaylist, pickPlaylistFile } from '../../lib/playlistPicker';
+import type { Edition } from '../../app/edition';
 
 /** How the IPTV subscription is provided. The connection type shown is always "IPTV". */
 type Method = 'account' | 'url' | 'file';
 
 type Props = {
   onConnected: (channels: M3UChannel[], source: string) => void;
-  /** Shashtna Player Lite: load live channels only. */
-  liveOnly?: boolean;
+  /** What to load: live only (Lite) or live + VOD (Full). */
+  edition: Edition;
 };
 
 async function checkNetworkConnection(): Promise<boolean> {
@@ -67,7 +68,8 @@ const TAGLINE = { ar: 'كل ما تحب، على شاشة واحدة.', en: 'Eve
  * - file: an .m3u / .m3u8 file picked with the system file picker, streamed
  *   from its content:// URI (never loaded into memory whole).
  */
-export default function ConnectionScreen({ onConnected, liveOnly = false }: Props) {
+export default function ConnectionScreen({ onConnected, edition }: Props) {
+  const liveOnly = edition.liveOnly;
   const { language, setLanguage } = useAppPreferences();
   const ar = language === 'ar';
   const palette = usePalette();
@@ -151,7 +153,7 @@ export default function ConnectionScreen({ onConnected, liveOnly = false }: Prop
         source,
         (received, total) => setProgress(total > 0 ? Math.min(99, (received / total) * 100) : 0),
         parsed => setCount(parsed),
-        { liveOnly, sizeHint },
+        { liveOnly, loadVod: edition.loadVod, sizeHint },
       );
 
       if (!channels.length) {
@@ -207,7 +209,7 @@ export default function ConnectionScreen({ onConnected, liveOnly = false }: Prop
             <View style={[styles.featureDot, { backgroundColor: palette.muted }]} />
             {liveOnly ? (
               <>
-                <Feature icon="favorites" label={ar ? 'المفضلة' : 'Favorites'} palette={palette} />
+                <Feature icon="grid" label={ar ? 'تصنيفات القنوات' : 'Channel groups'} palette={palette} />
                 <View style={[styles.featureDot, { backgroundColor: palette.muted }]} />
                 <Feature icon="search" label={ar ? 'بحث سريع' : 'Fast search'} palette={palette} />
               </>

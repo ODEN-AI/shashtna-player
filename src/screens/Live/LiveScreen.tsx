@@ -19,15 +19,22 @@ import { ALL_GROUP, Catalog, channelKey } from '../../features/catalog/catalog';
 import { createSearcher } from '../../features/catalog/search';
 import { toggleFavorite, useFavoriteKeys, useIsFavorite } from '../../features/favorites/favoritesStore';
 import { FocusRegion, initialRowFor, screenMemory } from '../../navigation/tvFocus';
-import { liveGridColumns } from '../../components/common/posterGrid';
+import { liveGridColumns } from './liveGrid';
 
 type Props = {
   /** Built once per source; categories are Map lookups (see features/catalog). */
   catalog: Catalog;
   /** `queue` is the list currently on screen; the player zaps through it. */
   onOpenPlayer: (channel: M3UChannel, queue: readonly M3UChannel[]) => void;
-  onBackHome: () => void;
-  /** Label/icon of the header shortcut (Home in Full, Favorites in Lite). */
+  /**
+   * Show the "Favorites" filter at the top of the categories (Full). Lite keeps
+   * favorites as channel-level state only (long-press + heart), with no
+   * Favorites filter or destination.
+   */
+  favoritesFilter?: boolean;
+  /** Header shortcut to the start page (Full: Home). Lite has none: Live TV is its start page. */
+  onBackHome?: () => void;
+  /** Label/icon of the header shortcut. */
   homeLabel?: string;
   homeIcon?: AppIconName;
   /** Pre-select a category (Home shortcut, or the one in use before opening the player). */
@@ -55,7 +62,7 @@ type LiveMemory = { query: string };
  * The visible, filtered list is what the player receives as its zapping queue,
  * so UP/DOWN in the player never jumps to a channel outside it.
  */
-export default function LiveScreen({ catalog, onOpenPlayer, onBackHome, homeLabel, homeIcon = 'home', initialGroup, onGroupChange, focusChannelId }: Props) {
+export default function LiveScreen({ catalog, onOpenPlayer, onBackHome, homeLabel, homeIcon = 'home', initialGroup, onGroupChange, focusChannelId, favoritesFilter = false }: Props) {
   const channels = catalog.live;
   const { language } = useAppPreferences();
   const palette = usePalette();
@@ -111,10 +118,10 @@ export default function LiveScreen({ catalog, onOpenPlayer, onBackHome, homeLabe
   const groups = useMemo<Group[]>(
     () => [
       { key: ALL, label: ar ? 'كل القنوات' : 'All channels', count: channels.length },
-      { key: FAVORITES_GROUP, label: ar ? 'المفضلة' : 'Favorites', count: favoriteChannels.length },
+      ...(favoritesFilter ? [{ key: FAVORITES_GROUP, label: ar ? 'المفضلة' : 'Favorites', count: favoriteChannels.length }] : []),
       ...catalog.liveGroups,
     ],
-    [catalog, channels.length, favoriteChannels.length, ar],
+    [catalog, channels.length, favoriteChannels.length, ar, favoritesFilter],
   );
 
   // Category change = Map lookup; search runs on precomputed lowercase keys.
@@ -207,7 +214,7 @@ export default function LiveScreen({ catalog, onOpenPlayer, onBackHome, homeLabe
             style={[styles.input, { color: palette.text, textAlign: ar ? 'right' : 'left' }]}
           />
         </View>
-        {!compact ? (
+        {!compact && onBackHome ? (
           <Pressable
             focusable
             accessibilityLabel={homeLabel || (ar ? 'الرئيسية' : 'Home')}

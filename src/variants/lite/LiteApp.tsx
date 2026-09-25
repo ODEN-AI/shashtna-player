@@ -2,6 +2,7 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { Animated, StatusBar, StyleSheet, View } from 'react-native';
 
 import AppShell from '../../app/AppShell';
+import type { Edition } from '../../app/edition';
 import LibraryLoadingScreen from '../../app/LibraryLoadingScreen';
 import PlayerHost, { PlayerLaunchOptions } from '../../app/PlayerHost';
 import SplashScreen from '../../app/SplashScreen';
@@ -17,33 +18,46 @@ import { M3UChannel } from '../../lib/m3u';
 import Sidebar from '../../navigation/Sidebar';
 import { screenMemory } from '../../navigation/tvFocus';
 import ConnectionScreen from '../../screens/Connection/ConnectionScreen';
-import FavoritesScreen from '../../screens/Favorites/FavoritesScreen';
 import LiveScreen from '../../screens/Live/LiveScreen';
 import SettingsScreen, { PreferredQuality } from '../../screens/Settings/SettingsScreen';
 
 /**
- * Shashtna Player Lite: Live TV first and only.
+ * Shashtna Player Lite: a dedicated Live TV application.
  *
- * Shares the connection, session, catalog, player, favorites, theme, TV focus
- * and diagnostics code with the Full app, but:
- * - loads live data only (2 Xtream requests instead of 6; VOD lines of plain
- *   M3U playlists are dropped while parsing, never stored);
- * - opens straight into Live TV; the navigation graph is Live / Favorites /
- *   Settings;
- * - never imports Home, Movies, Series, detail pages or Continue Watching
- *   UI, so none of that code is in the Lite bundle (index.lite.js).
+ * Navigation is exactly: البث المباشر, الإعدادات (in that order). There is no
+ * Home, Movies, Series, Favorites page or any other destination; Live TV is
+ * the start page and the page opened after connecting.
+ *
+ * Shares the connection, session, catalog, player, theme, TV focus and
+ * diagnostics code with the Full app, but:
+ * - its edition has no VOD loader: Xtream requests live categories + live
+ *   streams only, and plain M3U playlists keep live entries only (VOD lines
+ *   are dropped while streaming, never stored or cached);
+ * - it never imports Home, Movies, Series, detail pages, TMDB, ads, Continue
+ *   Watching or the Xtream VOD module, so none of it is in the Lite bundle
+ *   (built from index.lite.js; checked at build time in android/app/build.gradle).
+ *
+ * Channel favorites stay channel-level state only (long-press OK toggles the
+ * heart on a channel); there is no Favorites page or Favorites category.
  */
 
-type Page = 'live' | 'favorites' | 'settings';
+/** Found in the embedded bundle by the Gradle check; identifies this root. */
+export const EDITION_MARKER = 'shashtna-edition:lite';
+
+/** Lite edition: live only, no VOD loader or media indexer. */
+export const LITE_EDITION: Edition = { id: 'lite', liveOnly: true };
+
+export type LitePage = 'live' | 'settings';
+type Page = LitePage;
 type NavItem = { id: Page; label: string; icon: AppIconName };
 
-const START_PAGE: Page = 'live';
+/** Shown at launch and right after connecting. */
+export const START_PAGE: Page = 'live';
 
-function getNavItems(language: AppLanguage): NavItem[] {
+export function getLiteNavItems(language: AppLanguage): NavItem[] {
   const ar = language === 'ar';
   return [
     { id: 'live', label: ar ? 'البث المباشر' : 'Live TV', icon: 'live' },
-    { id: 'favorites', label: ar ? 'المفضلة' : 'Favorites', icon: 'favorites' },
     { id: 'settings', label: ar ? 'الإعدادات' : 'Settings', icon: 'settings' },
   ];
 }
@@ -51,7 +65,7 @@ function getNavItems(language: AppLanguage): NavItem[] {
 function LiteContent() {
   const preferences = usePreferencesState();
   const { language, setLanguage, themeMode, setThemeMode } = preferences;
-  const library = useLibrarySession({ liveOnly: true });
+  const library = useLibrarySession(LITE_EDITION);
   const { catalog } = library;
 
   const [page, setPage] = useState<Page>(START_PAGE);
@@ -62,7 +76,7 @@ function LiteContent() {
   const [subtitles, setSubtitles] = useState(false);
   const [liveGroup, setLiveGroup] = useState<string | null>(null);
   const [lastChannelId, setLastChannelId] = useState<string | null>(null);
-  const navItems = useMemo(() => getNavItems(language), [language]);
+  const navItems = useMemo(() => getLiteNavItems(language), [language]);
   const transition = usePageTransition(page);
 
   const navigate = useCallback((next: string) => setPage(next as Page), []);
@@ -95,7 +109,7 @@ function LiteContent() {
       <AppPreferencesProvider value={preferences}>
         <View style={styles.container}>
           <StatusBar barStyle="light-content" backgroundColor="#050C18" />
-          <ConnectionScreen onConnected={library.connect} liveOnly />
+          <ConnectionScreen onConnected={library.connect} edition={LITE_EDITION} />
         </View>
       </AppPreferencesProvider>
     );
@@ -123,9 +137,7 @@ function LiteContent() {
   }
 
   let content: React.ReactNode;
-  if (page === 'favorites') {
-    content = <FavoritesScreen catalog={catalog} onOpen={openChannel} liveOnly />;
-  } else if (page === 'settings') {
+  if (page === 'settings') {
     content = (
       <SettingsScreen
         preferredQuality={preferredQuality}
@@ -140,6 +152,7 @@ function LiteContent() {
         setThemeMode={setThemeMode}
         onChangeSource={changeSource}
         onRefreshLibrary={library.refresh}
+        liveOnly
         onBack={() => navigate(START_PAGE)}
       />
     );
@@ -148,9 +161,6 @@ function LiteContent() {
       <LiveScreen
         catalog={catalog}
         onOpenPlayer={openChannel}
-        onBackHome={() => navigate('favorites')}
-        homeLabel={language === 'ar' ? 'المفضلة' : 'Favorites'}
-        homeIcon="favorites"
         initialGroup={liveGroup}
         onGroupChange={setLiveGroup}
         focusChannelId={lastChannelId}
@@ -185,11 +195,12 @@ const styles = StyleSheet.create({
   page: { flex: 1 },
 });
 
+/** Root of Shashtna Player Lite (registered by index.lite.js). */
 export default function LiteApp() {
   const [splashDone, setSplashDone] = useState(false);
   const finishSplash = useCallback(() => setSplashDone(true), []);
   return (
-    <View style={styles.root}>
+    <View style={styles.root} testID={EDITION_MARKER}>
       <LiteContent />
       {splashDone ? null : <SplashScreen onFinish={finishSplash} name={BRAND_LITE.nameInside} />}
     </View>
