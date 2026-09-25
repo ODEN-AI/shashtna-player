@@ -33,10 +33,14 @@ type Props = {
  *   control is focused (TV) or touched, so it never moves under the user.
  * - Previous / next buttons, pagination dots, crossfade transition.
  * - Touch: horizontal swipe also changes ads.
+ * - `presentation: 'artwork'` ads are finished banners with their own text:
+ *   the image is shown whole (never cropped) and nothing is drawn over it;
+ *   when the ad has an action, the banner itself is the focusable button.
  */
 function HeroCarousel({ ads, onAction, palette, ar, height }: Props) {
   const [index, setIndex] = useState(0);
   const [interacting, setInteracting] = useState(false);
+  const [heroWidth, setHeroWidth] = useState(0);
   const fade = useRef(new Animated.Value(1)).current;
   const count = ads.length;
   const safeIndex = count ? index % count : 0;
@@ -93,68 +97,113 @@ function HeroCarousel({ ads, onAction, palette, ar, height }: Props) {
   const hasAction = ad.action.type !== 'none' && ad.cta;
   const imageSource = typeof ad.image === 'string' ? { uri: ad.image } : ad.image;
   const rowDirection = ar ? 'row-reverse' : 'row';
+  const artwork = ad.presentation === 'artwork' && !!imageSource;
+  // Banners are 8:3. On TV the hero is ~2.66:1, so the banner fills it and no backfill is needed.
+  const backfill = artwork && heroWidth > 0 && heroWidth / height < BANNER_RATIO - 0.25;
   const onFocus = () => setInteracting(true);
   const onBlur = () => setInteracting(false);
 
   return (
-    <View style={[styles.hero, { height, borderColor: palette.borderStrong }]} {...swipe.panHandlers}>
+    <View
+      style={[styles.hero, { height, borderColor: palette.borderStrong }]}
+      onLayout={e => setHeroWidth(e.nativeEvent.layout.width)}
+      {...swipe.panHandlers}
+    >
       <View style={[StyleSheet.absoluteFill, styles.glass]} />
       <Animated.View style={[StyleSheet.absoluteFill, { opacity: fade }]}>
-        {imageSource ? (
-          <Image source={imageSource} style={styles.artwork} resizeMode="cover" />
+        {artwork ? (
+          <>
+            {/* Where the box is not 8:3 (phones, portrait tablets) a blurred copy fills the sides. */}
+            {backfill ? (
+              <>
+                <Image source={imageSource} style={styles.artwork} resizeMode="cover" blurRadius={24} />
+                <View style={[StyleSheet.absoluteFill, styles.artworkDim]} />
+              </>
+            ) : null}
+            <Image
+              source={imageSource}
+              style={styles.artwork}
+              resizeMode="contain"
+              accessible={!hasAction}
+              accessibilityRole="image"
+              accessibilityLabel={[t(ad.title), t(ad.description)].filter(Boolean).join(' — ')}
+            />
+            {hasAction ? (
+              <Pressable
+                focusable
+                accessibilityRole="button"
+                accessibilityLabel={`${t(ad.cta)} — ${t(ad.title)}`}
+                onPress={() => onAction(ad)}
+                onFocus={onFocus}
+                onBlur={onBlur}
+                style={({ focused, pressed }) => [
+                  StyleSheet.absoluteFill,
+                  styles.artworkButton,
+                  focused && { borderColor: palette.focus, boxShadow: `inset 0px 0px 0px 2px ${palette.accent.glow}` },
+                  pressed && styles.pressed,
+                ]}
+              />
+            ) : null}
+          </>
         ) : (
-          <View style={[styles.glow, ar ? styles.glowRtl : styles.glowLtr, { experimental_backgroundImage: ad.accent || palette.accent.gradient }]} />
-        )}
-        <View style={[StyleSheet.absoluteFill, { experimental_backgroundImage: ar ? palette.heroFadeRtl : palette.heroFade }]} />
+          <>
+            {imageSource ? (
+              <Image source={imageSource} style={styles.artwork} resizeMode="cover" />
+            ) : (
+              <View style={[styles.glow, ar ? styles.glowRtl : styles.glowLtr, { experimental_backgroundImage: ad.accent || palette.accent.gradient }]} />
+            )}
+            <View style={[StyleSheet.absoluteFill, { experimental_backgroundImage: ar ? palette.heroFadeRtl : palette.heroFade }]} />
 
-        <View style={[styles.content, { flexDirection: rowDirection }]}>
-          <View style={[styles.copy, { alignItems: ar ? 'flex-end' : 'flex-start' }]}>
-            <View style={[styles.eyebrowRow, { flexDirection: rowDirection }]}>
-              <Image source={BRAND_ASSETS.logo} style={styles.eyebrowLogo} />
-              <Text style={[styles.eyebrow, { color: palette.accent.light }]}>{BRAND.nameInside}</Text>
-            </View>
-            <Text numberOfLines={2} style={[styles.title, { textAlign: ar ? 'right' : 'left', writingDirection: ar ? 'rtl' : 'ltr' }]}>
-              {t(ad.title)}
-            </Text>
-            <Text numberOfLines={3} style={[styles.description, { textAlign: ar ? 'right' : 'left', writingDirection: ar ? 'rtl' : 'ltr' }]}>
-              {t(ad.description)}
-            </Text>
+            <View style={[styles.content, { flexDirection: rowDirection }]}>
+              <View style={[styles.copy, { alignItems: ar ? 'flex-end' : 'flex-start' }]}>
+                <View style={[styles.eyebrowRow, { flexDirection: rowDirection }]}>
+                  <Image source={BRAND_ASSETS.logo} style={styles.eyebrowLogo} />
+                  <Text style={[styles.eyebrow, { color: palette.accent.light }]}>{BRAND.nameInside}</Text>
+                </View>
+                <Text numberOfLines={2} style={[styles.title, { textAlign: ar ? 'right' : 'left', writingDirection: ar ? 'rtl' : 'ltr' }]}>
+                  {t(ad.title)}
+                </Text>
+                <Text numberOfLines={3} style={[styles.description, { textAlign: ar ? 'right' : 'left', writingDirection: ar ? 'rtl' : 'ltr' }]}>
+                  {t(ad.description)}
+                </Text>
 
-            <View style={[styles.actions, { flexDirection: rowDirection }]}>
-              {hasAction ? (
-                <Pressable
-                  focusable
-                  accessibilityRole="button"
-                  onPress={() => onAction(ad)}
-                  onFocus={onFocus}
-                  onBlur={onBlur}
-                  style={({ focused, pressed }) => [
-                    styles.cta,
-                    { flexDirection: rowDirection, experimental_backgroundImage: palette.accent.gradient, boxShadow: palette.accent.buttonShadow },
-                    focused && focusStyle(palette, SHASHTNA_THEME.focus.buttonScale),
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <Text style={styles.ctaText}>{t(ad.cta)}</Text>
-                  <View style={ar ? styles.flipX : undefined}>
-                    <AppIcon name="arrow" size={16} color="#FFFFFF" />
-                  </View>
-                </Pressable>
+                <View style={[styles.actions, { flexDirection: rowDirection }]}>
+                  {hasAction ? (
+                    <Pressable
+                      focusable
+                      accessibilityRole="button"
+                      onPress={() => onAction(ad)}
+                      onFocus={onFocus}
+                      onBlur={onBlur}
+                      style={({ focused, pressed }) => [
+                        styles.cta,
+                        { flexDirection: rowDirection, experimental_backgroundImage: palette.accent.gradient, boxShadow: palette.accent.buttonShadow },
+                        focused && focusStyle(palette, SHASHTNA_THEME.focus.buttonScale),
+                        pressed && styles.pressed,
+                      ]}
+                    >
+                      <Text style={styles.ctaText}>{t(ad.cta)}</Text>
+                      <View style={ar ? styles.flipX : undefined}>
+                        <AppIcon name="arrow" size={16} color="#FFFFFF" />
+                      </View>
+                    </Pressable>
+                  ) : null}
+                  {ad.displayUrl ? <Text style={styles.displayUrl}>{ad.displayUrl}</Text> : null}
+                </View>
+              </View>
+
+              {!imageSource ? (
+                <View style={styles.badge}>
+                  <AppIcon name={ad.icon || 'megaphone'} size={54} color="#FFFFFF" />
+                </View>
               ) : null}
-              {ad.displayUrl ? <Text style={styles.displayUrl}>{ad.displayUrl}</Text> : null}
             </View>
-          </View>
-
-          {!imageSource ? (
-            <View style={styles.badge}>
-              <AppIcon name={ad.icon || 'megaphone'} size={54} color="#FFFFFF" />
-            </View>
-          ) : null}
-        </View>
+          </>
+        )}
       </Animated.View>
 
       {count > 1 ? (
-        <View style={[styles.nav, ar ? styles.navRtl : styles.navLtr, { flexDirection: rowDirection }]}>
+        <View style={[styles.nav, ar && !artwork ? styles.navRtl : styles.navLtr, { flexDirection: rowDirection }]}>
           <NavButton icon="back" label={ar ? 'الإعلان السابق' : 'Previous'} flip={ar} onPress={previous} onFocus={onFocus} onBlur={onBlur} palette={palette} />
           <View style={[styles.dots, { flexDirection: rowDirection }]}>
             {ads.map((item, i) => (
@@ -214,11 +263,16 @@ function NavButton({
 }
 
 const T = SHASHTNA_THEME.typography;
+/** Width / height of the finished advertisement banners (2048x768). */
+const BANNER_RATIO = 8 / 3;
 
 const styles = StyleSheet.create({
   hero: { borderRadius: 28, borderWidth: 1, overflow: 'hidden', boxShadow: '0px 18px 50px rgba(0,0,0,0.45)' },
   glass: { experimental_backgroundImage: SHASHTNA_THEME.gradients.glassPanel },
   artwork: { ...StyleSheet.absoluteFillObject, width: '100%', height: '100%' },
+  artworkDim: { backgroundColor: 'rgba(2,5,16,0.45)' },
+  // Focus ring drawn inside the hero's rounded frame (a scaled banner would clip).
+  artworkButton: { borderRadius: 27, borderWidth: 3, borderColor: 'transparent' },
   glow: { position: 'absolute', top: -80, width: '70%', height: '160%', borderRadius: 400, opacity: 0.55 },
   glowLtr: { right: -120 },
   glowRtl: { left: -120 },

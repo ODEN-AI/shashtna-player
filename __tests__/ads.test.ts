@@ -55,3 +55,65 @@ test('offline without cache: falls back to bundled ads', async () => {
   const ads = await new RemoteAdvertisementRepository('https://example.test/ads.json', local).list();
   expect(ads.map(ad => ad.id)).toEqual(['local']);
 });
+
+describe('bundled Shashtna banners', () => {
+  const { LOCAL_ADVERTISEMENTS } = require('../src/features/ads/localAdvertisements');
+  const { normalizeAdvertisements } = require('../src/features/ads/advertisementRepository');
+
+  test('the three banners show in the agreed order, as finished artwork', () => {
+    const ads = normalizeAdvertisements(LOCAL_ADVERTISEMENTS);
+    expect(ads.map((ad: any) => ad.id)).toEqual([
+      'shashtna-player-launch',
+      'shashtna-official-website',
+      'subscription-app-coming-soon',
+    ]);
+    for (const ad of ads) {
+      expect(ad.presentation).toBe('artwork');
+      expect(ad.image).toBeTruthy();
+    }
+    expect(ads[0].title.ar).toBe('تم إطلاق تطبيق شاشتنا بلير');
+    expect(ads[1].cta.ar).toBe('تصفح موقع شاشتنا');
+    expect(ads[2].title.ar).toBe('قريباً — تطبيق شاشتنا');
+  });
+
+  test('targets: player ad opens /apps, website ad opens the website, coming soon has none', () => {
+    const ads = normalizeAdvertisements(LOCAL_ADVERTISEMENTS);
+    expect(ads[0].action).toEqual({ type: 'external', url: 'https://shashtna.netlify.app/apps' });
+    expect(ads[1].action).toEqual({ type: 'external', url: 'https://shashtna.netlify.app/' });
+    expect(ads[2].action).toEqual({ type: 'none' });
+  });
+
+  test('with a website URL, the player ad opens its /apps page and the website ad the home page', () => {
+    jest.isolateModules(() => {
+      jest.doMock('../src/features/ads/adsConfig', () => ({
+        ...jest.requireActual('../src/features/ads/adsConfig'),
+        SHASHTNA_WEBSITE_URL: 'https://site.test/',
+      }));
+      const bundled = require('../src/features/ads/localAdvertisements').LOCAL_ADVERTISEMENTS;
+      const byId = Object.fromEntries(bundled.map((ad: any) => [ad.id, ad]));
+      expect(byId['shashtna-player-launch'].action).toEqual({ type: 'external', url: 'https://site.test/apps' });
+      expect(byId['shashtna-official-website'].action).toEqual({ type: 'external', url: 'https://site.test/' });
+      expect(byId['subscription-app-coming-soon'].action).toEqual({ type: 'none' });
+    });
+    jest.dontMock('../src/features/ads/adsConfig');
+  });
+});
+
+test('remote ads can be finished banners; without an image they fall back to the regular layout', async () => {
+  globalThis.fetch = jest.fn(async () => ({
+    ok: true,
+    json: async () => ({
+      advertisements: [
+        { id: 'banner', title: 'Banner', image: 'https://cdn.test/banner.webp', presentation: 'artwork', order: 1 },
+        { id: 'no-image', title: 'No image', presentation: 'artwork', order: 2 },
+        { id: 'plain', title: 'Plain', order: 3 },
+      ],
+    }),
+  })) as any;
+  const ads = await new RemoteAdvertisementRepository('https://example.test/ads.json', local).list();
+  expect(ads.map(ad => [ad.id, ad.presentation])).toEqual([
+    ['banner', 'artwork'],
+    ['no-image', 'overlay'],
+    ['plain', 'overlay'],
+  ]);
+});

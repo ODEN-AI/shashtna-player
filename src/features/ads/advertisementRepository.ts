@@ -83,6 +83,8 @@ export function normalizeAdvertisements(ads: Advertisement[], now = Date.now()):
       displayDuration: Math.max(4000, Math.min(30000, ad.displayDuration || DEFAULT_AD_DURATION_MS)),
       // An external action without a URL would be a dead button.
       action: ad.action.type === 'external' && !ad.action.url ? { type: 'none' as const } : ad.action,
+      // A finished-banner ad without its banner would be empty; show the regular layout instead.
+      presentation: ad.presentation === 'artwork' && ad.image ? ('artwork' as const) : ('overlay' as const),
     }))
     .sort((a, b) => a.order - b.order);
 }
@@ -136,6 +138,7 @@ function parseRemoteAd(value: any): Advertisement | null {
     action: parseAction(value.action, value.actionType, value.actionTarget),
     image: typeof value.image === 'string' && /^https?:\/\//i.test(value.image) ? value.image : undefined,
     accent: typeof value.accent === 'string' ? value.accent : undefined,
+    presentation: value.presentation === 'artwork' ? 'artwork' : 'overlay',
     displayUrl: typeof value.displayUrl === 'string' ? value.displayUrl : undefined,
     // `priority`: higher shows first; `order`: lower shows first.
     order: value.priority !== undefined ? -Number(value.priority) || 0 : Number(value.order) || 0,

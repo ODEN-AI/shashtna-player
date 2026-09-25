@@ -12,6 +12,8 @@ export type AdAction =
 
 export type LocalizedText = { ar: string; en: string };
 
+export type AdPresentation = 'overlay' | 'artwork';
+
 export type Advertisement = {
   id: string;
   title: LocalizedText;
@@ -21,6 +23,14 @@ export type Advertisement = {
   action: AdAction;
   /** Optional artwork: bundled asset (require) or remote URL. */
   image?: ImageSourcePropType | string;
+  /**
+   * How the artwork is shown:
+   * - 'overlay' (default): artwork behind the carousel's own title, description and button.
+   * - 'artwork': a finished banner whose text is part of the image; the carousel shows the
+   *   image alone (title/description/cta are kept for accessibility and the action).
+   *   Needs `image`; without one the ad falls back to 'overlay'.
+   */
+  presentation?: AdPresentation;
   /** Icon shown when there is no artwork. */
   icon?: AppIconName;
   /** CSS linear-gradient used for the accent glow. */
