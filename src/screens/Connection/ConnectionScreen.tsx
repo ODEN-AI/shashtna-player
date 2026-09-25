@@ -18,6 +18,7 @@ import { focusStyle, Palette, usePalette } from '../../design/palette';
 import { SHASHTNA_FONT, SHASHTNA_THEME } from '../../design/theme';
 import { buildXtreamM3UUrl, downloadAndParseM3U, M3UChannel } from '../../lib/m3u';
 import { describeConnectionError, ValidationError } from './connectionErrors';
+import { describeServerUrlProblem, normalizeServerUrl, validateServerUrl } from '../../lib/serverUrl';
 
 type Props = {
   onConnected: (channels: M3UChannel[], source: string) => void;
@@ -104,13 +105,17 @@ export default function ConnectionScreen({ onConnected, liveOnly = false }: Prop
       setProgress(0);
       setCount(0);
 
-      const cleanServer = server.trim();
+      // One normaliser for what is shown, validated, connected to and saved.
+      const cleanServer = normalizeServerUrl(server);
+      if (cleanServer !== server) setServer(cleanServer);
       const cleanUsername = username.trim();
       if (!cleanServer || !cleanUsername || !password) {
         throw new ValidationError(
           ar ? 'أكمل بيانات اشتراكك: السيرفر، اسم المستخدم، وكلمة المرور.' : 'Enter your server, username and password.',
         );
       }
+      const problem = validateServerUrl(cleanServer);
+      if (problem) throw new ValidationError(describeServerUrlProblem(problem, ar));
       const source = buildXtreamM3UUrl(cleanServer, cleanUsername, password);
 
       const channels = await downloadAndParseM3U(
@@ -231,6 +236,7 @@ export default function ConnectionScreen({ onConnected, liveOnly = false }: Prop
       <View style={styles.fields}>
         <Field
           label={ar ? 'رابط السيرفر' : 'Server URL'}
+          onEndEditing={() => setServer(value => normalizeServerUrl(value))}
           icon="link"
           value={server}
           onChangeText={setServer}
@@ -385,6 +391,7 @@ function Field({
   keyboardType,
   accessory,
   preferred = false,
+  onEndEditing,
 }: {
   label: string;
   icon: AppIconName;
@@ -399,6 +406,8 @@ function Field({
   keyboardType?: 'default' | 'url';
   accessory?: React.ReactNode;
   preferred?: boolean;
+  /** Called when the field loses focus (e.g. to normalise what was typed). */
+  onEndEditing?: () => void;
 }) {
   const [focused, setFocused] = useState(false);
   const dark = palette.mode === 'dark';
@@ -429,7 +438,10 @@ function Field({
           value={value}
           onChangeText={onChangeText}
           onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
+          onBlur={() => {
+            setFocused(false);
+            onEndEditing?.();
+          }}
           placeholder={placeholder}
           placeholderTextColor={dark ? 'rgba(150,165,195,0.55)' : 'rgba(117,109,97,0.6)'}
           secureTextEntry={secure}
