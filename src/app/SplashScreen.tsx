@@ -50,7 +50,7 @@ const styles = StyleSheet.create({
   root: { backgroundColor: SHASHTNA_THEME.colors.background, zIndex: 1000, alignItems: 'center', justifyContent: 'center' },
   dim: { backgroundColor: 'rgba(2,5,16,0.45)' },
   center: { alignItems: 'center' },
-  logo: { width: 148, height: 148, borderRadius: 36 },
+  logo: { width: 148, height: 148 },
   name: { marginTop: 18, color: '#FFFFFF', fontSize: 30, fontWeight: '900', fontFamily: SHASHTNA_FONT.sans, letterSpacing: 0.3 },
   credit: { position: 'absolute', bottom: 28, color: 'rgba(220,232,255,0.55)', fontSize: 12, fontWeight: '600', fontFamily: SHASHTNA_FONT.sans },
 });

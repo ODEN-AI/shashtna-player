@@ -1,4 +1,6 @@
 <resources>
     <!-- Matches the app canvas so the window never flashes white before JS loads. -->
     <color name="shashtna_canvas">#04070D</color>
+    <!-- Deep navy of the SHASHTNA icon edge (adaptive launcher icon background). -->
+    <color name="ic_launcher_background">#021A52</color>
 </resources>

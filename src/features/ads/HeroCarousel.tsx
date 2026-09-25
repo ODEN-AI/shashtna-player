@@ -225,7 +225,7 @@ const styles = StyleSheet.create({
   content: { flex: 1, paddingHorizontal: 38, paddingVertical: 30, alignItems: 'center', gap: 24 },
   copy: { flex: 1, justifyContent: 'center' },
   eyebrowRow: { alignItems: 'center', gap: 8, marginBottom: 12 },
-  eyebrowLogo: { width: 22, height: 22, borderRadius: 6 },
+  eyebrowLogo: { width: 22, height: 22 },
   eyebrow: { color: SHASHTNA_THEME.colors.primaryLight, fontSize: 13, fontWeight: '900', letterSpacing: 0.4 },
   title: { color: '#FFFFFF', fontSize: T.size.hero, lineHeight: T.lineHeight.hero, fontWeight: '900', fontFamily: SHASHTNA_FONT.display, maxWidth: 640 },
   description: { color: 'rgba(235,242,255,0.86)', fontSize: T.size.body, lineHeight: T.lineHeight.body, marginTop: 10, maxWidth: 600 },

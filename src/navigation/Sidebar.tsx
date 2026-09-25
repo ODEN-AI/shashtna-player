@@ -319,7 +319,7 @@ const styles = StyleSheet.create({
   sideRight: { right: 0 },
   railExpandedShadow: { boxShadow: '0px 0px 40px rgba(0,0,0,0.55)' },
   brand: { alignItems: 'center', gap: 12, height: 48, paddingHorizontal: 4 },
-  logo: { width: 44, height: 44, borderRadius: 12 },
+  logo: { width: 44, height: 44 },
   brandText: { flex: 1, minWidth: 0 },
   brandName: { fontSize: 17, fontWeight: '900', fontFamily: SHASHTNA_FONT.sans },
   toggle: { marginTop: 12, height: 32, borderRadius: 10, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
