@@ -9,9 +9,9 @@ import {
   TVFocusGuideView,
   View,
 } from 'react-native';
-import HScroll from '../../components/layout/HScroll';
 
 import AppIcon from '../../components/common/AppIcon';
+import { FilterButton, OptionSheet } from '../../components/filters/FilterControls';
 import { useAppPreferences } from '../../design/AppPreferencesContext';
 import { useDeviceClass } from '../../design/device';
 import { focusStyle, Palette, usePalette } from '../../design/palette';
@@ -39,7 +39,8 @@ const ALL = '__all__';
  * Live TV browser.
  *
  * TV / tablet: two panes — category list with channel counts, and a grid of
- * uniform channel cards. Phone: categories become a horizontal chip row.
+ * uniform channel cards. Phone: one category button that opens a sheet with
+ * every category.
  * The visible, filtered list is what the player receives as its zapping queue,
  * so UP/DOWN in the player never jumps to a channel outside it.
  */
@@ -55,6 +56,7 @@ export default function LiveScreen({ channels, onOpenPlayer, onBackHome, initial
   const [query, setQuery] = useState('');
   const [group, setGroup] = useState<string>(initialGroup || ALL);
   const [searchFocused, setSearchFocused] = useState(false);
+  const [groupSheet, setGroupSheet] = useState(false);
 
   useEffect(() => {
     if (initialGroup) setGroup(initialGroup);
@@ -205,27 +207,31 @@ export default function LiveScreen({ channels, onOpenPlayer, onBackHome, initial
     return (
       <View style={[styles.screen, styles.screenCompact, { backgroundColor: palette.background }]}>
         {header}
-        <HScroll ar={ar} style={styles.chipScroll} contentContainerStyle={styles.chips}>
-          {groups.map(g => {
-            const active = g.key === group;
-            return (
-              <Pressable
-                key={g.key}
-                onPress={() => selectGroup(g.key)}
-                style={({ pressed }) => [
-                  styles.chip,
-                  { backgroundColor: palette.surface, borderColor: palette.border },
-                  active && [styles.chipActive, { experimental_backgroundImage: palette.accent.gradient }],
-                  pressed && styles.pressed,
-                ]}
-              >
-                <Text numberOfLines={1} style={[styles.chipText, { color: active ? '#FFFFFF' : palette.secondary }]}>
-                  {g.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </HScroll>
+        <View style={styles.groupButton}>
+          <FilterButton
+            caption={ar ? 'التصنيف' : 'Category'}
+            value={activeGroupLabel}
+            count={groups.find(g => g.key === group)?.count}
+            icon="grid"
+            active={group !== ALL}
+            onPress={() => setGroupSheet(true)}
+            palette={palette}
+            ar={ar}
+          />
+        </View>
+        <OptionSheet
+          visible={groupSheet}
+          title={ar ? 'اختر التصنيف' : 'Choose a category'}
+          options={groups}
+          selectedKey={group}
+          onSelect={key => {
+            selectGroup(key);
+            setGroupSheet(false);
+          }}
+          onClose={() => setGroupSheet(false)}
+          palette={palette}
+          ar={ar}
+        />
         {channelList}
       </View>
     );
@@ -375,6 +381,7 @@ const styles = StyleSheet.create({
   input: { flex: 1, fontFamily: SHASHTNA_FONT.sans, fontSize: 16, paddingVertical: 0 },
 
   body: { flex: 1, gap: 18 },
+  groupButton: { marginBottom: 12 },
   groupPane: { width: 264, borderRadius: 24, borderWidth: 1, paddingTop: 14, paddingHorizontal: 10, marginBottom: 20 },
   paneCaption: { fontSize: 11, fontWeight: '900', letterSpacing: 1.4, paddingHorizontal: 12, marginBottom: 8 },
   groupList: { paddingBottom: 16, gap: 4 },
@@ -386,11 +393,6 @@ const styles = StyleSheet.create({
   groupCount: { fontSize: 13, fontWeight: '800', fontVariant: ['tabular-nums'] },
   channelPane: { flex: 1 },
 
-  chipScroll: { flexGrow: 0, marginBottom: 12 },
-  chips: { gap: 8, paddingVertical: 4 },
-  chip: { height: 40, maxWidth: 220, borderRadius: 20, borderWidth: 1, paddingHorizontal: 16, alignItems: 'center', justifyContent: 'center' },
-  chipActive: { experimental_backgroundImage: SHASHTNA_THEME.gradients.brand, borderColor: 'transparent' },
-  chipText: { fontSize: 14, fontFamily: SHASHTNA_FONT.sans, fontWeight: '800' },
 
   list: { paddingTop: 4, paddingBottom: 40, paddingHorizontal: 4 },
   row: { gap: 14 },

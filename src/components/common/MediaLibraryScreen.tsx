@@ -8,12 +8,13 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import HScroll from '../layout/HScroll';
+import { ClearFiltersButton, FilterButton, FilterOption, OptionSheet } from '../filters/FilterControls';
 import { M3UChannel } from '../../lib/m3u';
 import { getTmdbMetadata } from '../../lib/tmdb';
 import AppIcon from './AppIcon';
 import { SHASHTNA_FONT, SHASHTNA_THEME } from '../../design/theme';
 import { useAppPreferences } from '../../design/AppPreferencesContext';
+import { useDeviceClass } from '../../design/device';
 import { focusStyle, Palette, usePalette } from '../../design/palette';
 
 type MediaType = 'movie' | 'series';
@@ -30,6 +31,7 @@ type Props = {
 };
 type Item = { channel: M3UChannel; title: string; group: string; episodeCount: number };
 type SortMode = 'latest' | 'rating' | 'az';
+const ALL_GROUPS = '__all__';
 
 function clean(v: string) {
   return String(v || '')
@@ -125,54 +127,40 @@ function MediaCard({ item, type, onPress, isFavorite, onToggleFavorite, palette,
   );
 }
 
-function Chip({ label, icon, active, onPress, palette }: {
-  label: string;
-  icon?: import('./AppIcon').AppIconName;
-  active?: boolean;
-  onPress: () => void;
-  palette: Palette;
-}) {
-  return (
-    <Pressable
-      focusable
-      onPress={onPress}
-      style={({ focused, pressed }) => [
-        styles.chip,
-        { backgroundColor: palette.surface, borderColor: palette.border },
-        active && [styles.chipActive, { experimental_backgroundImage: palette.accent.gradient }],
-        focused && focusStyle(palette, SHASHTNA_THEME.focus.buttonScale),
-        pressed && styles.pressed,
-      ]}
-    >
-      {icon ? <AppIcon name={icon} size={13} color={active ? '#FFFFFF' : palette.primaryText} /> : null}
-      <Text style={[styles.chipText, { color: active ? '#FFFFFF' : palette.secondary }]}>{label}</Text>
-    </Pressable>
-  );
-}
-
 export default function MediaLibraryScreen({ type, title, channels, onOpenPlayer, onBack, favoriteIds = [], onToggleFavorite }: Props) {
   const { language } = useAppPreferences();
   const palette = usePalette();
   const ar = language === 'ar';
   const rowDirection = ar ? 'row-reverse' : 'row';
+  // Phones stack the header and give search and the filter buttons the full width.
+  const compact = useDeviceClass() === 'phone';
   const items = useMemo(() => buildItems(channels, type), [channels, type]);
   const favoriteSet = useMemo(() => new Set(favoriteIds), [favoriteIds]);
-  const groups = useMemo(
-    () => [ar ? 'الكل' : 'All', ...Array.from(new Set(items.map(i => i.group).filter(Boolean))).slice(0, 18)],
-    [items, ar],
-  );
+  // Every category with its title count; the sheet lists them all, so none are cut off.
+  const groups = useMemo<FilterOption[]>(() => {
+    const counts = new Map<string, number>();
+    for (const i of items) if (i.group) counts.set(i.group, (counts.get(i.group) || 0) + 1);
+    return [
+      { key: ALL_GROUPS, label: ar ? 'الكل' : 'All', count: items.length },
+      ...Array.from(counts, ([name, count]) => ({ key: name, label: name, count })),
+    ];
+  }, [items, ar]);
+  const sortOptions = useMemo<FilterOption[]>(() => [
+    { key: 'latest', label: ar ? 'الأحدث' : 'Latest', icon: 'clock' },
+    { key: 'rating', label: ar ? 'الأعلى تقييماً' : 'Top rated', icon: 'star' },
+    { key: 'az', label: ar ? 'أبجدي (A-Z)' : 'A-Z', icon: 'grid' },
+  ], [ar]);
   const [query, setQuery] = useState('');
-  const [group, setGroup] = useState(ar ? 'الكل' : 'All');
+  const [group, setGroup] = useState(ALL_GROUPS);
   const [sort, setSort] = useState<SortMode>('latest');
+  const [sheet, setSheet] = useState<'group' | 'sort' | null>(null);
   const [ratings, setRatings] = useState<Record<string, number>>({});
   const [searchFocused, setSearchFocused] = useState(false);
-
-  useEffect(() => { setGroup(ar ? 'الكل' : 'All'); }, [ar]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     const arr = items.filter(i =>
-      (group === (ar ? 'الكل' : 'All') || i.group === group) &&
+      (group === ALL_GROUPS || i.group === group) &&
       (!q || i.title.toLowerCase().includes(q) || i.group.toLowerCase().includes(q)),
     );
     if (sort === 'az') arr.sort((a, b) => a.title.localeCompare(b.title, ar ? 'ar' : 'en'));
@@ -197,18 +185,21 @@ export default function MediaLibraryScreen({ type, title, channels, onOpenPlayer
     return () => { alive = false; };
   }, [sort, type, filtered.length, filtered.slice(0, 20).map(item => String(item.channel.id)).join('|')]);
 
-  const reset = () => { setQuery(''); setGroup(ar ? 'الكل' : 'All'); setSort('latest'); };
+  const reset = () => { setQuery(''); setGroup(ALL_GROUPS); setSort('latest'); };
+  const activeGroup = groups.find(g => g.key === group) || groups[0];
+  const activeSort = sortOptions.find(o => o.key === sort) || sortOptions[0];
+  const filtersActive = group !== ALL_GROUPS || sort !== 'latest' || query.trim() !== '';
 
   return (
-    <View style={[styles.screen, { backgroundColor: palette.background }]}>
-      <View style={[styles.header, { flexDirection: rowDirection }]}>
-        <View style={styles.headerTitleWrap}>
+    <View style={[styles.screen, compact && styles.screenCompact, { backgroundColor: palette.background }]}>
+      <View style={[styles.header, compact && styles.headerCompact, { flexDirection: compact ? 'column' : rowDirection }]}>
+        <View style={[styles.headerTitleWrap, compact && styles.headerTitleWrapCompact]}>
           <Text style={[styles.eyebrow, { color: palette.primaryText, textAlign: ar ? 'right' : 'left' }]}>{type === 'movie' ? 'MOVIES' : 'SERIES'}</Text>
           <Text style={[styles.pageTitle, { color: palette.text, textAlign: ar ? 'right' : 'left' }]}>{title}</Text>
           <Text style={[styles.pageSub, { color: palette.muted, textAlign: ar ? 'right' : 'left' }]}>{filtered.length.toLocaleString(ar ? 'ar-IQ' : 'en-US')} {type === 'movie' ? (ar ? 'فيلم متاح' : 'titles available') : (ar ? 'مسلسل متاح' : 'series available')}</Text>
         </View>
-        <View style={[styles.headerTools, { flexDirection: rowDirection }]}>
-          <View style={[styles.searchBox, { flexDirection: rowDirection, backgroundColor: palette.surface, borderColor: searchFocused ? palette.focus : palette.border }]}>
+        <View style={[styles.headerTools, compact && styles.headerToolsCompact, { flexDirection: rowDirection }]}>
+          <View style={[styles.searchBox, compact && styles.searchBoxCompact, { flexDirection: rowDirection, backgroundColor: palette.surface, borderColor: searchFocused ? palette.focus : palette.border }]}>
             <AppIcon name="search" size={18} color={palette.muted} />
             <TextInput
               value={query}
@@ -239,23 +230,51 @@ export default function MediaLibraryScreen({ type, title, channels, onOpenPlayer
       </View>
 
       <View style={[styles.toolbar, { flexDirection: rowDirection }]}>
-        <HScroll ar={ar} style={styles.chipScroll} contentContainerStyle={styles.chipRow}>
-          {groups.map(g => <Chip key={g} label={g} active={group === g} onPress={() => setGroup(g)} palette={palette} />)}
-        </HScroll>
-        <View style={[styles.sortGroup, { flexDirection: rowDirection, backgroundColor: palette.surface, borderColor: palette.border }]}>
-          <Chip label={ar ? 'الأحدث' : 'Latest'} active={sort === 'latest'} onPress={() => setSort('latest')} palette={palette} />
-          <Chip label={ar ? 'التقييم' : 'Rating'} active={sort === 'rating'} onPress={() => setSort('rating')} icon="star" palette={palette} />
-          <Chip label="A-Z" active={sort === 'az'} onPress={() => setSort('az')} palette={palette} />
-          <Pressable
-            focusable
-            accessibilityLabel={ar ? 'إعادة' : 'Reset'}
-            onPress={reset}
-            style={({ focused, pressed }) => [styles.resetButton, focused && focusStyle(palette, SHASHTNA_THEME.focus.iconScale), pressed && styles.pressed]}
-          >
-            <AppIcon name="refresh" size={17} color={palette.secondary} />
-          </Pressable>
-        </View>
+        <FilterButton
+          grow
+          caption={ar ? 'التصنيف' : 'Category'}
+          value={activeGroup.label}
+          count={activeGroup.count}
+          icon="grid"
+          active={group !== ALL_GROUPS}
+          onPress={() => setSheet('group')}
+          palette={palette}
+          ar={ar}
+        />
+        <FilterButton
+          grow={compact}
+          caption={ar ? 'الترتيب' : 'Sort by'}
+          value={activeSort.label}
+          icon="sliders"
+          active={sort !== 'latest'}
+          onPress={() => setSheet('sort')}
+          palette={palette}
+          ar={ar}
+        />
+        {filtersActive ? <ClearFiltersButton onPress={reset} palette={palette} ar={ar} /> : null}
       </View>
+
+      <OptionSheet
+        visible={sheet === 'group'}
+        title={ar ? 'اختر التصنيف' : 'Choose a category'}
+        options={groups}
+        selectedKey={group}
+        onSelect={key => { setGroup(key); setSheet(null); }}
+        onClose={() => setSheet(null)}
+        palette={palette}
+        ar={ar}
+      />
+      <OptionSheet
+        visible={sheet === 'sort'}
+        variant="list"
+        title={ar ? 'ترتيب حسب' : 'Sort by'}
+        options={sortOptions}
+        selectedKey={sort}
+        onSelect={key => { setSort(key as SortMode); setSheet(null); }}
+        onClose={() => setSheet(null)}
+        palette={palette}
+        ar={ar}
+      />
 
       <FlatList
         data={filtered}
@@ -309,6 +328,11 @@ const styles = StyleSheet.create({
   screen: { flex: 1, paddingHorizontal: SHASHTNA_THEME.layout.contentX, paddingTop: 26 },
   header: { alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 18, gap: 20 },
   headerTitleWrap: { flex: 1 },
+  headerTitleWrapCompact: { flexGrow: 0, flexShrink: 0, flexBasis: 'auto' },
+  screenCompact: { paddingHorizontal: 16, paddingTop: 16 },
+  headerCompact: { alignItems: 'stretch', gap: 12 },
+  headerToolsCompact: { alignSelf: 'stretch' },
+  searchBoxCompact: { flex: 1, width: undefined },
   headerTools: { alignItems: 'center', gap: 12 },
   eyebrow: { fontSize: 12, fontWeight: '900', letterSpacing: 2.4 },
   pageTitle: { fontSize: T.size.pageTitle, lineHeight: T.lineHeight.pageTitle, fontWeight: '900', fontFamily: SHASHTNA_FONT.display, marginTop: 4 },
@@ -317,14 +341,7 @@ const styles = StyleSheet.create({
   iconButton: { width: 48, height: 48, borderRadius: 24, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
   searchBox: { width: 340, height: 48, borderRadius: 24, borderWidth: 2, alignItems: 'center', paddingHorizontal: 18, gap: 10 },
   searchInput: { flex: 1, fontFamily: SHASHTNA_FONT.sans, fontSize: 16, paddingVertical: 0 },
-  toolbar: { alignItems: 'center', justifyContent: 'space-between', gap: 14, marginBottom: 14 },
-  chipScroll: { flex: 1 },
-  chipRow: { gap: 8, alignItems: 'center', paddingVertical: 6, paddingHorizontal: 4 },
-  sortGroup: { alignItems: 'center', gap: 4, padding: 4, borderRadius: 24, borderWidth: 1 },
-  chip: { height: 38, borderRadius: 19, borderWidth: 2, paddingHorizontal: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
-  chipActive: { experimental_backgroundImage: SHASHTNA_THEME.gradients.brand, borderColor: 'transparent' },
-  chipText: { fontFamily: SHASHTNA_FONT.sans, fontSize: 14, fontWeight: '800' },
-  resetButton: { width: 38, height: 38, borderRadius: 19, borderWidth: 2, borderColor: 'transparent', alignItems: 'center', justifyContent: 'center' },
+  toolbar: { alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 16, paddingHorizontal: 4 },
   grid: { paddingBottom: 40, paddingTop: 10, paddingHorizontal: 4 },
   gridRow: { gap: 16, marginBottom: 22 },
   cardWrap: { width: CARD_W, position: 'relative' },
