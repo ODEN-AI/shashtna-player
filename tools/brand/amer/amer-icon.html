@@ -1,0 +1,45 @@
+<!doctype html>
+<!-- Master artwork for the عامر IPTV icon. Rendered to amer-icon-master.png
+     (1024x1024, transparent corners) by render_master.mjs with Chromium, so the
+     Arabic wordmark is shaped by a real text engine. -->
+<html><head><meta charset="utf-8">
+<style>
+@font-face { font-family: Plex; font-weight: 700; src: url(../../../android/app/src/main/res/font/ibm_plex_sans_arabic_bold.ttf); }
+@font-face { font-family: Plex; font-weight: 600; src: url(../../../android/app/src/main/res/font/ibm_plex_sans_arabic_semibold.ttf); }
+html, body { margin: 0; background: transparent; }
+.icon {
+  position: relative; width: 1024px; height: 1024px; border-radius: 232px; overflow: hidden;
+  background:
+    radial-gradient(120% 90% at 85% 0%, rgba(56, 214, 255, 0.55) 0%, rgba(56, 214, 255, 0) 55%),
+    radial-gradient(90% 70% at 0% 100%, rgba(47, 123, 255, 0.55) 0%, rgba(47, 123, 255, 0) 60%),
+    linear-gradient(155deg, #0B1E5B 0%, #0A2F8F 46%, #0B5FD6 100%);
+  box-shadow: inset 0 0 0 10px rgba(160, 220, 255, 0.22);
+}
+.sheen { position: absolute; left: 0; right: 0; top: 0; height: 46%;
+  background: linear-gradient(180deg, rgba(255,255,255,0.14), rgba(255,255,255,0)); }
+.signal { position: absolute; left: 50%; top: 132px; transform: translateX(-50%); }
+.name {
+  position: absolute; left: 0; right: 0; top: 262px; text-align: center; direction: rtl;
+  font-family: Plex; font-weight: 700; font-size: 318px; line-height: 1; color: #FFFFFF;
+  text-shadow: 0 14px 40px rgba(0, 10, 40, 0.45);
+}
+.tag {
+  position: absolute; left: 50%; bottom: 150px; transform: translateX(-50%);
+  padding: 22px 64px 26px; border-radius: 999px;
+  background: linear-gradient(90deg, #22C7FF 0%, #2F7BFF 100%);
+  box-shadow: 0 16px 40px rgba(0, 20, 70, 0.45), inset 0 2px 0 rgba(255,255,255,0.35);
+  font-family: Plex; font-weight: 700; font-size: 104px; letter-spacing: 18px; line-height: 1;
+  color: #FFFFFF; padding-right: 46px;
+}
+</style></head>
+<body><div class="icon" id="icon">
+  <div class="sheen"></div>
+  <svg class="signal" width="240" height="120" viewBox="0 0 240 120" fill="none">
+    <circle cx="120" cy="104" r="15" fill="#7FE3FF"/>
+    <path d="M78 86 A60 60 0 0 1 162 86" stroke="#7FE3FF" stroke-width="16" stroke-linecap="round"/>
+    <path d="M44 58 A104 104 0 0 1 196 58" stroke="#7FE3FF" stroke-opacity="0.7" stroke-width="16" stroke-linecap="round"/>
+    <path d="M12 30 A148 148 0 0 1 228 30" stroke="#7FE3FF" stroke-opacity="0.4" stroke-width="16" stroke-linecap="round"/>
+  </svg>
+  <div class="name">عامر</div>
+  <div class="tag">IPTV</div>
+</div></body></html>

@@ -1,0 +1,4 @@
+<resources>
+    <!-- Amer IPTV edition: launcher and app name (applicationId com.ameriptv.player). -->
+    <string name="app_name">عامر IPTV</string>
+</resources>

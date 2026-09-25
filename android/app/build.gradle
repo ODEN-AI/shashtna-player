@@ -4,9 +4,10 @@ apply plugin: "com.facebook.react"
 
 react {
     autolinkLibrariesWithApp()
-    // With product flavors the debug variants are fullDebug / liteDebug; they
-    // load JS from Metro, every other variant bundles it into the APK.
-    debuggableVariants = ["fullDebug", "liteDebug"]
+    // With product flavors the debug variants are fullDebug / liteDebug /
+    // amerDebug; they load JS from Metro, every other variant bundles it into
+    // the APK. (amerDebug: start Metro with --config metro.amer.config.js.)
+    debuggableVariants = ["fullDebug", "liteDebug", "amerDebug"]
 }
 
 def enableProguardInReleaseBuilds = false
@@ -70,10 +71,13 @@ android {
         }
     }
 
-    // Editions. One codebase, two apps that can be installed side by side:
+    // Editions. One codebase, three apps that can be installed side by side:
     //   full: Live TV + Movies + Series. applicationId com.shashtnaplayer (unchanged).
     //   lite: Live TV only. applicationId com.shashtnaplayer.lite, launcher name from
     //         src/lite/res/values/strings.xml, JS entry index.lite.js (no VOD code).
+    //   amer: عامر IPTV, the Lite app with its own brand. applicationId
+    //         com.ameriptv.player (own storage, own launcher name/icons/TV banner in
+    //         src/amer/res), JS entry index.amer.js bundled with metro.amer.config.js.
     flavorDimensions "edition"
     productFlavors {
         full {
@@ -85,6 +89,12 @@ android {
             applicationIdSuffix ".lite"
             versionNameSuffix "-lite"
             buildConfigField "String", "JS_MAIN_MODULE", '"index.lite"'
+        }
+        amer {
+            dimension "edition"
+            applicationId "com.ameriptv.player"
+            versionNameSuffix "-amer"
+            buildConfigField "String", "JS_MAIN_MODULE", '"index.amer"'
         }
     }
 
@@ -122,6 +132,20 @@ androidComponents {
     }
 }
 
+// عامر IPTV: same mechanism, its own entry, and the Metro config that swaps in
+// the Amer brand and edition marker modules (metro.amer.config.js).
+androidComponents {
+    onVariants(selector().all()) { variant ->
+        if (variant.flavorName != "amer") return
+        def taskName = "createBundle${variant.name.substring(0, 1).toUpperCase()}${variant.name.substring(1)}JsAndAssets"
+        if (!tasks.names.contains(taskName)) return
+        tasks.named(taskName).configure { t ->
+            t.entryFile.set(file("../../index.amer.js"))
+            t.bundleConfig.set(file("../../metro.amer.config.js"))
+        }
+    }
+}
+
 // Build-time guard: a bundle task fails the build if its entry file is not the
 // edition's entry, or if the finished bundle does not carry its own edition
 // marker (EDITION_MARKER in App.tsx / LiteApp.tsx) or carries the other one.
@@ -140,11 +164,33 @@ tasks.matching { it.name ==~ /createBundle(Full|Lite)\w*JsAndAssets/ }.configure
     t.doLast {
         def bundle = new File(t.jsBundleDir.get().asFile, t.bundleAssetName.get())
         def content = new String(bundle.bytes, "ISO-8859-1")
-        if (!content.contains(ownMarker) || content.contains(otherMarker)) {
+        if (!content.contains(ownMarker) || content.contains(otherMarker) || content.contains("ameriptv-edition:amer")) {
             throw new GradleException("${t.name}: ${bundle} is not the ${lite ? 'Lite' : 'Full'} bundle " +
                 "(expected marker ${ownMarker}, must not contain ${otherMarker})")
         }
         logger.lifecycle("${t.name}: verified ${bundle.name} (entry ${expectedEntry}, marker ${ownMarker})")
+    }
+}
+
+// Same guard for عامر IPTV: entry index.amer.js, bundled with the Amer Metro
+// config, carrying the Amer marker and neither Shashtna marker.
+tasks.matching { it.name ==~ /createBundleAmer\w*JsAndAssets/ }.configureEach { t ->
+    t.doFirst {
+        def entry = t.entryFile.get().asFile.name
+        def config = t.bundleConfig.isPresent() ? t.bundleConfig.get().asFile.name : "<none>"
+        if (entry != "index.amer.js" || config != "metro.amer.config.js") {
+            throw new GradleException("${t.name}: JS entry ${entry} / Metro config ${config}, expected index.amer.js / metro.amer.config.js")
+        }
+    }
+    t.doLast {
+        def bundle = new File(t.jsBundleDir.get().asFile, t.bundleAssetName.get())
+        def content = new String(bundle.bytes, "ISO-8859-1")
+        def foreign = ["shashtna-edition:full", "shashtna-edition:lite"].findAll { content.contains(it) }
+        if (!content.contains("ameriptv-edition:amer") || foreign) {
+            throw new GradleException("${t.name}: ${bundle} is not the Amer IPTV bundle " +
+                "(expected marker ameriptv-edition:amer, found ${foreign ?: 'no Amer marker'})")
+        }
+        logger.lifecycle("${t.name}: verified ${bundle.name} (entry index.amer.js, marker ameriptv-edition:amer)")
     }
 }
 

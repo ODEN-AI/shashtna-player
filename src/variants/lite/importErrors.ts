@@ -1,3 +1,5 @@
+import { BRAND_LITE } from '../../design/brand';
+
 /**
  * Arabic / English messages for M3U file import in Shashtna Player Lite.
  * (Full's sign-in errors, which also cover Xtream accounts and links, are in
@@ -18,8 +20,8 @@ export function describeImportError(error: unknown, ar: boolean): { message: str
     case 'NoLiveChannelsError':
       return {
         message: pick(
-          'لم يتم العثور على قنوات مباشرة داخل الملف. شاشتنا Lite تعرض البث المباشر فقط.',
-          'No live TV channels were found in the file. Shashtna Player Lite shows live TV only.',
+          `لم يتم العثور على قنوات مباشرة داخل الملف. ${BRAND_LITE.liveOnlyNote.ar}`,
+          `No live TV channels were found in the file. ${BRAND_LITE.liveOnlyNote.en}`,
         ),
         technical: '',
       };

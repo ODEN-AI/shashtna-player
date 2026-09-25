@@ -31,14 +31,14 @@ type Props = {
 export const IMPORT_TEXT = {
   ar: {
     title: 'استيراد ملف M3U',
-    description: 'اختر ملف M3U من جهازك لبدء استخدام القنوات المباشرة.',
+    description: BRAND_LITE.importDescription.ar,
     action: 'رفع ملف M3U',
     reading: 'جاري قراءة ملف M3U...',
     failed: 'تعذر استيراد ملف M3U',
   },
   en: {
     title: 'Import an M3U file',
-    description: 'Choose an M3U file on this device to start watching live channels.',
+    description: BRAND_LITE.importDescription.en,
     action: 'Upload M3U file',
     reading: 'Reading the M3U file...',
     failed: 'M3U import failed',

@@ -6,12 +6,15 @@
  * body text and surface tokens never change with it, so every accent keeps
  * the same contrast and overall look.
  */
+import { BRAND_ACCENT } from '../../design/brand';
+
 export type AccentId = 'shashtna' | 'cyan' | 'purple' | 'green' | 'rose' | 'custom';
 
 export type AccentSwatch = { id: AccentId; labelAr: string; labelEn: string; base: string };
 
 export const ACCENT_PRESETS: AccentSwatch[] = [
-  { id: 'shashtna', labelAr: 'أزرق شاشتنا', labelEn: 'Shashtna Blue', base: '#2F7BFF' },
+  // The brand's own blue; its name comes from the edition's brand module.
+  { id: 'shashtna', labelAr: BRAND_ACCENT.ar, labelEn: BRAND_ACCENT.en, base: '#2F7BFF' },
   { id: 'cyan', labelAr: 'سماوي', labelEn: 'Cyan', base: '#14B8D9' },
   { id: 'purple', labelAr: 'بنفسجي', labelEn: 'Purple', base: '#8B5CF6' },
   { id: 'green', labelAr: 'أخضر', labelEn: 'Green', base: '#16B97E' },

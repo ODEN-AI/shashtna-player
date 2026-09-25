@@ -18,6 +18,7 @@ import Sidebar from '../../navigation/Sidebar';
 import { screenMemory } from '../../navigation/tvFocus';
 import LiveScreen from '../../screens/Live/LiveScreen';
 import SettingsScreen, { PreferredQuality } from '../../screens/Settings/SettingsScreen';
+import { EDITION_MARKER } from './editionMarker';
 import LiteImportScreen from './LiteImportScreen';
 import LiteSourceSection from './LiteSourceSection';
 import { ImportProgress, useLitePlaylist } from './useLitePlaylist';
@@ -45,7 +46,7 @@ import { ImportProgress, useLitePlaylist } from './useLitePlaylist';
  */
 
 /** Found in the embedded bundle by the Gradle check; identifies this root. */
-export const EDITION_MARKER = 'shashtna-edition:lite';
+export { EDITION_MARKER };
 
 export type LitePage = 'live' | 'settings';
 type Page = LitePage;
