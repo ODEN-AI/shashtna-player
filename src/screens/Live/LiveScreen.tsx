@@ -134,9 +134,24 @@ export default function LiveScreen({ catalog, onOpenPlayer, onBackHome, homeLabe
   );
 
   // Returning from the player: start the list at the channel that was playing.
+  // Only for the list shown on arrival; once the user changes category or
+  // search, focus stays where they are instead of jumping into the grid.
+  const [focusTarget, setFocusTarget] = useState(focusChannelId);
+  const arrival = useRef(true);
+  useEffect(() => {
+    if (arrival.current) {
+      arrival.current = false;
+      return;
+    }
+    setFocusTarget(null);
+  }, [group, query]);
+  useEffect(() => {
+    // A new return from the player (same page instance).
+    if (focusChannelId) setFocusTarget(focusChannelId);
+  }, [focusChannelId]);
   const focusIndex = useMemo(
-    () => (focusChannelId ? filtered.findIndex(c => String(c.id) === focusChannelId) : -1),
-    [filtered, focusChannelId],
+    () => (focusTarget ? filtered.findIndex(c => String(c.id) === focusTarget) : -1),
+    [filtered, focusTarget],
   );
   const rowHeight = SHASHTNA_THEME.layout.liveCardH + (columns === 1 ? 10 : 14);
   // First focus: the channel just watched, otherwise the active category.
