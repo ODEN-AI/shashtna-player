@@ -15,6 +15,7 @@ import AppIcon from './AppIcon';
 import { SHASHTNA_FONT, SHASHTNA_THEME } from '../../design/theme';
 import { useAppPreferences } from '../../design/AppPreferencesContext';
 import { useDeviceClass } from '../../design/device';
+import { posterGridLayout, PosterGridLayout } from './posterGrid';
 import { focusStyle, Palette, usePalette } from '../../design/palette';
 
 type MediaType = 'movie' | 'series';
@@ -60,7 +61,7 @@ function buildItems(channels: M3UChannel[], type: MediaType): Item[] {
   return [...map.values()];
 }
 
-function MediaCard({ item, type, onPress, isFavorite, onToggleFavorite, palette, ar }: { item: Item; type: MediaType; onPress: () => void; isFavorite?: boolean; onToggleFavorite?: (channel: M3UChannel) => void; palette: Palette; ar: boolean }) {
+function MediaCard({ item, type, onPress, isFavorite, onToggleFavorite, palette, ar, grid }: { item: Item; type: MediaType; onPress: () => void; isFavorite?: boolean; onToggleFavorite?: (channel: M3UChannel) => void; palette: Palette; ar: boolean; grid: PosterGridLayout }) {
   const [failed, setFailed] = useState(false);
   const poster = item.channel.logo || '';
   const title = item.title;
@@ -72,7 +73,7 @@ function MediaCard({ item, type, onPress, isFavorite, onToggleFavorite, palette,
     : year || item.group || typeLabel;
 
   return (
-    <View style={styles.cardWrap}>
+    <View style={[styles.cardWrap, { width: grid.cardWidth }]}>
       <Pressable
         focusable
         accessibilityRole="button"
@@ -80,6 +81,7 @@ function MediaCard({ item, type, onPress, isFavorite, onToggleFavorite, palette,
         onPress={onPress}
         style={({ focused, pressed }) => [
           styles.posterFrame,
+          { width: grid.cardWidth, height: grid.cardHeight },
           { backgroundColor: palette.surfaceElevated, borderColor: palette.border },
           focused && focusStyle(palette),
           pressed && styles.pressed,
@@ -133,7 +135,12 @@ export default function MediaLibraryScreen({ type, title, channels, onOpenPlayer
   const ar = language === 'ar';
   const rowDirection = ar ? 'row-reverse' : 'row';
   // Phones stack the header and give search and the filter buttons the full width.
-  const compact = useDeviceClass() === 'phone';
+  const device = useDeviceClass();
+  const compact = device === 'phone';
+  // Width the grid really has (after the rail, screen padding and list padding).
+  const [gridWidth, setGridWidth] = useState(0);
+  const grid = useMemo(() => posterGridLayout(gridWidth - GRID_PAD_X * 2, device), [gridWidth, device]);
+  const gridReady = device === 'tv' || gridWidth > 0;
   const items = useMemo(() => buildItems(channels, type), [channels, type]);
   const favoriteSet = useMemo(() => new Set(favoriteIds), [favoriteIds]);
   // Every category with its title count; the sheet lists them all, so none are cut off.
@@ -276,30 +283,36 @@ export default function MediaLibraryScreen({ type, title, channels, onOpenPlayer
         ar={ar}
       />
 
-      <FlatList
-        data={filtered}
-        keyExtractor={i => `${type}:${i.channel.id}`}
-        numColumns={SHASHTNA_THEME.layout.gridColumns}
-        columnWrapperStyle={[styles.gridRow, { flexDirection: rowDirection }]}
-        contentContainerStyle={styles.grid}
-        showsVerticalScrollIndicator={false}
-        renderItem={({ item }) => (
-          <MediaCard
-            item={item}
-            type={type}
-            onPress={() => onOpenPlayer(item.channel)}
-            isFavorite={favoriteSet.has(`${type}:${item.channel.id}`)}
-            onToggleFavorite={onToggleFavorite}
-            palette={palette}
-            ar={ar}
+      <View style={styles.gridArea} onLayout={e => setGridWidth(e.nativeEvent.layout.width)}>
+        {gridReady ? (
+          <FlatList
+            key={`grid-${grid.columns}`}
+            data={filtered}
+            keyExtractor={i => `${type}:${i.channel.id}`}
+            numColumns={grid.columns}
+            columnWrapperStyle={grid.columns > 1 ? [styles.gridRow, { gap: grid.gap, flexDirection: rowDirection }] : undefined}
+            contentContainerStyle={styles.grid}
+            showsVerticalScrollIndicator={false}
+            renderItem={({ item }) => (
+              <MediaCard
+                item={item}
+                type={type}
+                onPress={() => onOpenPlayer(item.channel)}
+                isFavorite={favoriteSet.has(`${type}:${item.channel.id}`)}
+                onToggleFavorite={onToggleFavorite}
+                palette={palette}
+                ar={ar}
+                grid={grid}
+              />
+            )}
+            ListEmptyComponent={<Empty type={type} palette={palette} ar={ar} />}
+            removeClippedSubviews
+            initialNumToRender={15}
+            maxToRenderPerBatch={10}
+            windowSize={7}
           />
-        )}
-        ListEmptyComponent={<Empty type={type} palette={palette} ar={ar} />}
-        removeClippedSubviews
-        initialNumToRender={15}
-        maxToRenderPerBatch={10}
-        windowSize={7}
-      />
+        ) : null}
+      </View>
     </View>
   );
 }
@@ -321,8 +334,7 @@ function Empty({ type, palette, ar }: { type: MediaType; palette: Palette; ar: b
 }
 
 const T = SHASHTNA_THEME.typography;
-const CARD_W = 128;
-const CARD_H = 192;
+const GRID_PAD_X = 4;
 
 const styles = StyleSheet.create({
   screen: { flex: 1, paddingHorizontal: SHASHTNA_THEME.layout.contentX, paddingTop: 26 },
@@ -342,10 +354,11 @@ const styles = StyleSheet.create({
   searchBox: { width: 340, height: 48, borderRadius: 24, borderWidth: 2, alignItems: 'center', paddingHorizontal: 18, gap: 10 },
   searchInput: { flex: 1, fontFamily: SHASHTNA_FONT.sans, fontSize: 16, paddingVertical: 0 },
   toolbar: { alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 16, paddingHorizontal: 4 },
-  grid: { paddingBottom: 40, paddingTop: 10, paddingHorizontal: 4 },
-  gridRow: { gap: 16, marginBottom: 22 },
-  cardWrap: { width: CARD_W, position: 'relative' },
-  posterFrame: { width: CARD_W, height: CARD_H, borderRadius: 16, overflow: 'hidden', borderWidth: 1 },
+  gridArea: { flex: 1 },
+  grid: { paddingBottom: 40, paddingTop: 10, paddingHorizontal: GRID_PAD_X },
+  gridRow: { marginBottom: 22 },
+  cardWrap: { position: 'relative' },
+  posterFrame: { borderRadius: 16, overflow: 'hidden', borderWidth: 1 },
   posterImage: { width: '100%', height: '100%' },
   posterFallback: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 12, gap: 10, experimental_backgroundImage: 'linear-gradient(160deg, #13203A 0%, #0A101C 100%)' },
   posterFallbackText: { fontSize: 13, lineHeight: 18, fontWeight: '800', textAlign: 'center' },
