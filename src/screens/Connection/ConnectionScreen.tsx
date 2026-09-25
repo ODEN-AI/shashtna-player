@@ -12,13 +12,17 @@ import { Text, TextInput } from '../../components/common/Typography';
 import AppIcon, { AppIconName } from '../../components/common/AppIcon';
 import { ShellBackground } from '../../app/AppShell';
 import { useAppPreferences } from '../../design/AppPreferencesContext';
-import { BRAND, BRAND_ASSETS } from '../../design/brand';
+import { BRAND, BRAND_ASSETS, BRAND_LITE } from '../../design/brand';
 import { useDeviceClass } from '../../design/device';
 import { focusStyle, Palette, usePalette } from '../../design/palette';
 import { SHASHTNA_FONT, SHASHTNA_THEME } from '../../design/theme';
 import { buildXtreamM3UUrl, downloadAndParseM3U, M3UChannel } from '../../lib/m3u';
 import { describeConnectionError, ValidationError } from './connectionErrors';
 import { describeServerUrlProblem, normalizeServerUrl, validateServerUrl } from '../../lib/serverUrl';
+import { looksLikePlaylistName, PickedPlaylist, pickPlaylistFile } from '../../lib/playlistPicker';
+
+/** How the IPTV subscription is provided. The connection type shown is always "IPTV". */
+type Method = 'account' | 'url' | 'file';
 
 type Props = {
   onConnected: (channels: M3UChannel[], source: string) => void;
@@ -55,10 +59,13 @@ const TAGLINE = { ar: 'كل ما تحب، على شاشة واحدة.', en: 'Eve
 /**
  * Sign-in / connection screen.
  *
- * One connection type is offered, shown to users as "IPTV". Internally it is
- * the unchanged Xtream flow: the credentials become the player's M3U URL via
- * buildXtreamM3UUrl and are loaded with downloadAndParseM3U (the same loader
- * App uses to restore a saved source).
+ * One connection type is shown to users: "IPTV". It can be provided three ways,
+ * all loaded by the same downloadAndParseM3U into the same channel model:
+ * - account: server + username + password (Xtream API, via buildXtreamM3UUrl);
+ * - url: an M3U / M3U8 playlist link (a pasted Xtream get.php link is
+ *   recognised and loaded through the API);
+ * - file: an .m3u / .m3u8 file picked with the system file picker, streamed
+ *   from its content:// URI (never loaded into memory whole).
  */
 export default function ConnectionScreen({ onConnected, liveOnly = false }: Props) {
   const { language, setLanguage } = useAppPreferences();
@@ -70,6 +77,9 @@ export default function ConnectionScreen({ onConnected, liveOnly = false }: Prop
   const rowDirection = ar ? 'row-reverse' : 'row';
   const align = ar ? 'right' : 'left';
 
+  const [method, setMethod] = useState<Method>('account');
+  const [playlistUrl, setPlaylistUrl] = useState('');
+  const [pickedFile, setPickedFile] = useState<PickedPlaylist | null>(null);
   const [server, setServer] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -105,24 +115,43 @@ export default function ConnectionScreen({ onConnected, liveOnly = false }: Prop
       setProgress(0);
       setCount(0);
 
-      // One normaliser for what is shown, validated, connected to and saved.
-      const cleanServer = normalizeServerUrl(server);
-      if (cleanServer !== server) setServer(cleanServer);
-      const cleanUsername = username.trim();
-      if (!cleanServer || !cleanUsername || !password) {
-        throw new ValidationError(
-          ar ? 'أكمل بيانات اشتراكك: السيرفر، اسم المستخدم، وكلمة المرور.' : 'Enter your server, username and password.',
-        );
+      let source: string;
+      let sizeHint: number | undefined;
+      if (method === 'account') {
+        // One normaliser for what is shown, validated, connected to and saved.
+        const cleanServer = normalizeServerUrl(server);
+        if (cleanServer !== server) setServer(cleanServer);
+        const cleanUsername = username.trim();
+        if (!cleanServer || !cleanUsername || !password) {
+          throw new ValidationError(
+            ar ? 'أكمل بيانات اشتراكك: السيرفر، اسم المستخدم، وكلمة المرور.' : 'Enter your server, username and password.',
+          );
+        }
+        const problem = validateServerUrl(cleanServer);
+        if (problem) throw new ValidationError(describeServerUrlProblem(problem, ar));
+        source = buildXtreamM3UUrl(cleanServer, cleanUsername, password);
+      } else if (method === 'url') {
+        const cleanUrl = normalizeServerUrl(playlistUrl);
+        if (cleanUrl !== playlistUrl) setPlaylistUrl(cleanUrl);
+        if (!cleanUrl) {
+          throw new ValidationError(ar ? 'أدخل رابط قائمة التشغيل.' : 'Enter the playlist link.');
+        }
+        const problem = validateServerUrl(cleanUrl);
+        if (problem) throw new ValidationError(describeServerUrlProblem(problem, ar));
+        source = cleanUrl;
+      } else {
+        if (!pickedFile) {
+          throw new ValidationError(ar ? 'اختر ملف قائمة التشغيل أولاً.' : 'Choose a playlist file first.');
+        }
+        source = pickedFile.uri;
+        sizeHint = pickedFile.size > 0 ? pickedFile.size : undefined;
       }
-      const problem = validateServerUrl(cleanServer);
-      if (problem) throw new ValidationError(describeServerUrlProblem(problem, ar));
-      const source = buildXtreamM3UUrl(cleanServer, cleanUsername, password);
 
       const channels = await downloadAndParseM3U(
         source,
-        value => setProgress(value),
+        (received, total) => setProgress(total > 0 ? Math.min(99, (received / total) * 100) : 0),
         parsed => setCount(parsed),
-        { liveOnly },
+        { liveOnly, sizeHint },
       );
 
       if (!channels.length) {
@@ -156,7 +185,7 @@ export default function ConnectionScreen({ onConnected, liveOnly = false }: Prop
         <Image source={BRAND_ASSETS.logo} style={[styles.icon, compact && styles.iconCompact]} resizeMode="contain" />
       </View>
 
-      <Text style={[styles.wordmark, { color: palette.muted }]}>{BRAND.nameLatin.toUpperCase()}</Text>
+      <Text style={[styles.wordmark, { color: palette.muted }]}>{(liveOnly ? BRAND_LITE.nameLatin : BRAND.nameLatin).toUpperCase()}</Text>
 
       <Text
         style={[
@@ -176,9 +205,19 @@ export default function ConnectionScreen({ onConnected, liveOnly = false }: Prop
           <View style={[styles.features, { flexDirection: rowDirection }]}>
             <Feature icon="live" label={ar ? 'بث مباشر' : 'Live TV'} palette={palette} />
             <View style={[styles.featureDot, { backgroundColor: palette.muted }]} />
-            <Feature icon="movies" label={ar ? 'أفلام' : 'Movies'} palette={palette} />
-            <View style={[styles.featureDot, { backgroundColor: palette.muted }]} />
-            <Feature icon="series" label={ar ? 'مسلسلات' : 'Series'} palette={palette} />
+            {liveOnly ? (
+              <>
+                <Feature icon="favorites" label={ar ? 'المفضلة' : 'Favorites'} palette={palette} />
+                <View style={[styles.featureDot, { backgroundColor: palette.muted }]} />
+                <Feature icon="search" label={ar ? 'بحث سريع' : 'Fast search'} palette={palette} />
+              </>
+            ) : (
+              <>
+                <Feature icon="movies" label={ar ? 'أفلام' : 'Movies'} palette={palette} />
+                <View style={[styles.featureDot, { backgroundColor: palette.muted }]} />
+                <Feature icon="series" label={ar ? 'مسلسلات' : 'Series'} palette={palette} />
+              </>
+            )}
           </View>
         </>
       ) : null}
@@ -229,10 +268,52 @@ export default function ConnectionScreen({ onConnected, liveOnly = false }: Prop
       <View style={styles.heading}>
         <Text style={[styles.cardTitle, { color: palette.text, textAlign: align }]}>{ar ? 'تسجيل الدخول' : 'Sign in'}</Text>
         <Text style={[styles.cardSub, { color: palette.muted, textAlign: align }]}>
-          {ar ? 'أدخل بيانات اشتراكك وابدأ المشاهدة فوراً.' : 'Enter your subscription details to start watching.'}
+          {method === 'account'
+            ? ar ? 'أدخل بيانات اشتراكك وابدأ المشاهدة فوراً.' : 'Enter your subscription details to start watching.'
+            : method === 'url'
+              ? ar ? 'الصق رابط قائمة التشغيل من مزود الخدمة.' : 'Paste the playlist link from your provider.'
+              : ar ? 'اختر ملف قائمة التشغيل من جهازك.' : 'Choose a playlist file from this device.'}
         </Text>
       </View>
 
+      <MethodTabs method={method} onChange={next => { setMethod(next); setError(null); }} palette={palette} ar={ar} disabled={loading} />
+
+      {method === 'url' ? (
+        <View style={styles.fields}>
+          <Field
+            label={ar ? 'رابط قائمة التشغيل (M3U)' : 'Playlist link (M3U)'}
+            onEndEditing={() => setPlaylistUrl(value => normalizeServerUrl(value))}
+            icon="link"
+            value={playlistUrl}
+            onChangeText={setPlaylistUrl}
+            placeholder="http://provider.tv/playlist.m3u"
+            palette={palette}
+            ar={ar}
+            ltrValue
+            keyboardType="url"
+          />
+        </View>
+      ) : null}
+
+      {method === 'file' ? (
+        <FilePickerField
+          file={pickedFile}
+          disabled={loading}
+          onPick={async () => {
+            setError(null);
+            try {
+              const picked = await pickPlaylistFile();
+              if (picked) setPickedFile(picked);
+            } catch (e) {
+              setError(describeConnectionError(e, ar));
+            }
+          }}
+          palette={palette}
+          ar={ar}
+        />
+      ) : null}
+
+      {method === 'account' ? (
       <View style={styles.fields}>
         <Field
           label={ar ? 'رابط السيرفر' : 'Server URL'}
@@ -271,6 +352,7 @@ export default function ConnectionScreen({ onConnected, liveOnly = false }: Prop
           }
         />
       </View>
+      ) : null}
 
       <Pressable
         focusable
@@ -306,7 +388,11 @@ export default function ConnectionScreen({ onConnected, liveOnly = false }: Prop
             <View style={[styles.progressFill, { width: `${Math.max(4, Math.min(100, progress))}%`, backgroundColor: palette.accent.bright }]} />
           </View>
           <Text style={[styles.progressText, { color: palette.muted, textAlign: align }]}>
-            {ar ? `تم تجهيز ${count.toLocaleString('ar-IQ')} عنصر` : `${count.toLocaleString('en-US')} items ready`}
+            {method === 'file' && progress > 0
+              ? ar
+                ? `تمت قراءة ${Math.round(progress)}٪ · ${count.toLocaleString('ar-IQ')} عنصر`
+                : `${Math.round(progress)}% read · ${count.toLocaleString('en-US')} items`
+              : ar ? `تم تجهيز ${count.toLocaleString('ar-IQ')} عنصر` : `${count.toLocaleString('en-US')} items ready`}
           </Text>
         </View>
       ) : null}
@@ -366,6 +452,119 @@ export default function ConnectionScreen({ onConnected, liveOnly = false }: Prop
         <Text style={[styles.credit, { color: palette.muted }]}>{ar ? 'تصميم عبدالرحمن عامر' : 'Design by Abdulrahman Amer'}</Text>
       </ScrollView>
     </View>
+  );
+}
+
+function MethodTabs({
+  method,
+  onChange,
+  palette,
+  ar,
+  disabled,
+}: {
+  method: Method;
+  onChange: (method: Method) => void;
+  palette: Palette;
+  ar: boolean;
+  disabled: boolean;
+}) {
+  const tabs: Array<{ id: Method; label: string; icon: AppIconName }> = [
+    { id: 'account', label: ar ? 'بيانات الحساب' : 'Account', icon: 'user' },
+    { id: 'url', label: ar ? 'رابط M3U' : 'M3U link', icon: 'link' },
+    { id: 'file', label: ar ? 'ملف M3U' : 'M3U file', icon: 'folder' },
+  ];
+  return (
+    <View
+      accessibilityRole="tablist"
+      style={[styles.methods, { flexDirection: ar ? 'row-reverse' : 'row', borderColor: palette.glassBorder }]}
+    >
+      {tabs.map(tab => {
+        const active = tab.id === method;
+        return (
+          <Pressable
+            key={tab.id}
+            focusable
+            disabled={disabled}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: active }}
+            accessibilityLabel={tab.label}
+            // OK switches the method; moving focus across the tabs does not, so
+            // D-pad LEFT/RIGHT never changes the form under the user.
+            onPress={() => onChange(tab.id)}
+            style={({ focused, pressed }) => [
+              styles.methodTab,
+              { flexDirection: ar ? 'row-reverse' : 'row' },
+              active && { experimental_backgroundImage: palette.accent.gradient },
+              focused && { borderColor: palette.focus, boxShadow: palette.accent.focusShadow },
+              pressed && styles.pressed,
+            ]}
+          >
+            <AppIcon name={tab.icon} size={15} color={active ? '#FFFFFF' : palette.secondary} />
+            <Text numberOfLines={1} style={[styles.methodText, { color: active ? '#FFFFFF' : palette.secondary }]}>
+              {tab.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+function FilePickerField({
+  file,
+  onPick,
+  palette,
+  ar,
+  disabled,
+}: {
+  file: PickedPlaylist | null;
+  onPick: () => void;
+  palette: Palette;
+  ar: boolean;
+  disabled: boolean;
+}) {
+  const dark = palette.mode === 'dark';
+  const sizeLabel =
+    file && file.size > 0
+      ? file.size >= 1024 * 1024
+        ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
+        : `${Math.max(1, Math.round(file.size / 1024))} KB`
+      : '';
+  const warn = file && !looksLikePlaylistName(file.name);
+  return (
+    <Pressable
+      focusable
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityLabel={file ? file.name : ar ? 'اختيار ملف قائمة التشغيل' : 'Choose playlist file'}
+      onPress={onPick}
+      style={({ focused, pressed }) => [
+        styles.inputWrap,
+        {
+          flexDirection: ar ? 'row-reverse' : 'row',
+          borderColor: focused ? palette.focus : palette.glassBorder,
+          backgroundColor: dark ? 'rgba(3,7,18,0.52)' : palette.surface,
+        },
+        focused && { boxShadow: palette.accent.focusShadow },
+        pressed && styles.pressed,
+      ]}
+    >
+      <AppIcon name="folder" size={18} color={palette.muted} />
+      <View style={styles.fieldBody}>
+        <Text numberOfLines={1} style={[styles.fieldLabel, { color: palette.muted, textAlign: ar ? 'right' : 'left' }]}>
+          {ar ? 'ملف قائمة التشغيل (.m3u / .m3u8)' : 'Playlist file (.m3u / .m3u8)'}
+        </Text>
+        <Text
+          numberOfLines={1}
+          style={[styles.fileName, { color: file ? palette.text : palette.muted, textAlign: ar ? 'right' : 'left' }]}
+        >
+          {file
+            ? `${file.name}${sizeLabel ? ` · ${sizeLabel}` : ''}${warn ? (ar ? ' · سيتم التحقق من المحتوى' : ' · content will be checked') : ''}`
+            : ar ? 'اضغط لاختيار ملف' : 'Press to choose a file'}
+        </Text>
+      </View>
+      <AppIcon name="chevron" size={14} color={palette.muted} />
+    </Pressable>
   );
 }
 
@@ -510,9 +709,9 @@ const styles = StyleSheet.create({
     borderRadius: 28,
     borderWidth: 1,
     paddingHorizontal: 28,
-    paddingTop: 22,
-    paddingBottom: 18,
-    gap: 16,
+    paddingTop: 20,
+    paddingBottom: 16,
+    gap: 13,
     overflow: 'hidden',
     boxShadow: '0px 30px 70px rgba(0,0,0,0.5)',
   },
@@ -541,10 +740,14 @@ const styles = StyleSheet.create({
   cardTitle: { fontSize: 28, lineHeight: 36, fontWeight: '900', fontFamily: SHASHTNA_FONT.sans },
   cardSub: { fontSize: 13, lineHeight: 19 },
 
-  fields: { gap: 12 },
+  fields: { gap: 10 },
+  methods: { height: 44, borderRadius: 14, borderWidth: 1, padding: 3, gap: 3 },
+  methodTab: { flex: 1, borderRadius: 11, alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 2, borderColor: 'transparent' },
+  methodText: { fontSize: 13, fontWeight: '800', fontFamily: SHASHTNA_FONT.sans },
+  fileName: { fontSize: 15, fontFamily: SHASHTNA_FONT.sans, marginTop: 2 },
   fieldBody: { flex: 1, minWidth: 0, justifyContent: 'center' },
   fieldLabel: { fontSize: 11, fontWeight: '800', fontFamily: SHASHTNA_FONT.sans, letterSpacing: 0.2 },
-  inputWrap: { height: 58, borderRadius: 15, borderWidth: 1.5, paddingHorizontal: 16, alignItems: 'center', gap: 12 },
+  inputWrap: { height: 54, borderRadius: 15, borderWidth: 1.5, paddingHorizontal: 16, alignItems: 'center', gap: 12 },
   input: { height: 24, fontSize: 16, fontFamily: SHASHTNA_FONT.sans, paddingVertical: 0, paddingHorizontal: 0, marginTop: 1 },
   ltrInput: { textAlign: 'left', writingDirection: 'ltr' },
   ltrInputRtlSide: { textAlign: 'right' },

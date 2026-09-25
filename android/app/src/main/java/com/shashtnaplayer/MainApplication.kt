@@ -21,6 +21,8 @@ class MainApplication : Application(), ReactApplication {
         PackageList(this).packages.apply {
           // App-local module: Android Keystore-backed storage for credentials.
           add(SecureStorePackage())
+          // App-local module: system file picker for M3U playlist import.
+          add(PlaylistPickerPackage())
         },
     )
   }

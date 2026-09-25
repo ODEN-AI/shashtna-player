@@ -16,11 +16,41 @@ export function describeConnectionError(error: unknown, ar: boolean): { message:
     return { message: error.message, technical: '' };
   }
 
+  const name = error instanceof Error ? error.name : '';
+  const pick0 = (a: string, e: string) => (ar ? a : e);
+  if (name === 'PlaylistFormatError') {
+    return {
+      message: pick0(
+        'الملف مو قائمة تشغيل M3U. اختر ملف ‎.m3u أو ‎.m3u8 صحيح.',
+        'This file is not an M3U playlist. Choose a valid .m3u or .m3u8 file.',
+      ),
+      technical: '',
+    };
+  }
+  if (name === 'PickerUnavailableError') {
+    return {
+      message: pick0(
+        'ما في مدير ملفات على هذا الجهاز لاختيار الملف. استخدم رابط القائمة بدلاً من ذلك.',
+        'This device has no file picker. Use the playlist link instead.',
+      ),
+      technical: '',
+    };
+  }
+
   const raw = error instanceof Error ? error.message : String(error ?? '');
   const technical = redactSecrets(raw).slice(0, 300);
   const text = raw.toLowerCase();
   const pick = (a: string, e: string) => (ar ? a : e);
 
+  if (/permission denial|securityexception|no content provider|filenotfound|no such file|enoent/.test(text)) {
+    return {
+      message: pick(
+        'تعذر قراءة ملف القائمة. ربما انحذف أو انسحبت صلاحية الوصول. استورد الملف مرة ثانية.',
+        'The playlist file could not be read. It may have been removed or access was revoked. Import it again.',
+      ),
+      technical,
+    };
+  }
   if (/\b(401|403)\b|unauthori[sz]ed|forbidden|auth/.test(text)) {
     return {
       message: pick(
