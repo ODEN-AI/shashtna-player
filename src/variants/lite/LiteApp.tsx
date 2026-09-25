@@ -1,5 +1,5 @@
-import React, { useCallback, useMemo, useState } from 'react';
-import { Animated, StatusBar, StyleSheet, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Animated, StatusBar, StyleSheet, Text, View } from 'react-native';
 
 import AppShell from '../../app/AppShell';
 import type { Edition } from '../../app/edition';
@@ -10,11 +10,11 @@ import { useBackNavigation } from '../../app/useBackNavigation';
 import { useLibrarySession } from '../../app/useLibrarySession';
 import { usePageTransition } from '../../app/usePageTransition';
 import { usePreferencesState } from '../../app/usePreferencesState';
-import { AppIconName } from '../../components/common/AppIcon';
+import AppIcon, { AppIconName } from '../../components/common/AppIcon';
 import { AppLanguage, AppPreferencesProvider } from '../../design/AppPreferencesContext';
 import { BRAND_LITE } from '../../design/brand';
-import { SHASHTNA_THEME } from '../../design/theme';
-import { M3UChannel } from '../../lib/m3u';
+import { SHASHTNA_FONT, SHASHTNA_THEME } from '../../design/theme';
+import { isLocalPlaylistSource, M3UChannel } from '../../lib/m3u';
 import Sidebar from '../../navigation/Sidebar';
 import { screenMemory } from '../../navigation/tvFocus';
 import ConnectionScreen from '../../screens/Connection/ConnectionScreen';
@@ -54,6 +54,16 @@ type NavItem = { id: Page; label: string; icon: AppIconName };
 /** Shown at launch and right after connecting. */
 export const START_PAGE: Page = 'live';
 
+/** How long the "M3U file loaded" confirmation stays on screen. */
+export const IMPORT_NOTICE_MS = 6000;
+
+/** Confirmation shown over Live TV after an M3U file was imported. */
+export function importNoticeText(count: number, ar: boolean): { title: string; detail: string } {
+  return ar
+    ? { title: 'تم تحميل ملف M3U بنجاح', detail: `عدد القنوات: ${count.toLocaleString('ar-IQ')}` }
+    : { title: 'M3U file loaded', detail: `Channels: ${count.toLocaleString('en-US')}` };
+}
+
 export function getLiteNavItems(language: AppLanguage): NavItem[] {
   const ar = language === 'ar';
   return [
@@ -76,6 +86,28 @@ function LiteContent() {
   const [subtitles, setSubtitles] = useState(false);
   const [liveGroup, setLiveGroup] = useState<string | null>(null);
   const [lastChannelId, setLastChannelId] = useState<string | null>(null);
+  // Set when an M3U file was just imported; shown once Live TV is on screen.
+  const [importNotice, setImportNotice] = useState(false);
+  const ready = library.status === 'ready';
+  useEffect(() => {
+    if (!importNotice || !ready) return;
+    const timer = setTimeout(() => setImportNotice(false), IMPORT_NOTICE_MS);
+    return () => clearTimeout(timer);
+  }, [importNotice, ready]);
+
+  const { connect } = library;
+  const onConnected = useCallback(
+    (channels: M3UChannel[], source: string) => {
+      // A fresh import always lands on Live TV, at the top of all channels.
+      setPage(START_PAGE);
+      setLiveGroup(null);
+      setLastChannelId(null);
+      screenMemory.clear();
+      setImportNotice(isLocalPlaylistSource(source));
+      return connect(channels, source);
+    },
+    [connect],
+  );
   const navItems = useMemo(() => getLiteNavItems(language), [language]);
   const transition = usePageTransition(page);
 
@@ -109,7 +141,12 @@ function LiteContent() {
       <AppPreferencesProvider value={preferences}>
         <View style={styles.container}>
           <StatusBar barStyle="light-content" backgroundColor="#050C18" />
-          <ConnectionScreen onConnected={library.connect} edition={LITE_EDITION} />
+          <ConnectionScreen
+            onConnected={onConnected}
+            edition={LITE_EDITION}
+            restoreError={library.failure?.error}
+            initialMethod={library.failure && isLocalPlaylistSource(library.failure.source) ? 'file' : undefined}
+          />
         </View>
       </AppPreferencesProvider>
     );
@@ -184,8 +221,31 @@ function LiteContent() {
         }
       >
         <Animated.View style={[styles.page, transition]}>{content}</Animated.View>
+        {importNotice ? <ImportNotice count={catalog.live.length} ar={language === 'ar'} /> : null}
       </AppShell>
     </AppPreferencesProvider>
+  );
+}
+
+/** "M3U file loaded · N channels" banner; not focusable, so the remote stays on the channels. */
+function ImportNotice({ count, ar }: { count: number; ar: boolean }) {
+  const { title, detail } = importNoticeText(count, ar);
+  return (
+    <View
+      pointerEvents="none"
+      accessibilityRole="alert"
+      accessibilityLiveRegion="polite"
+      testID="lite-import-notice"
+      style={[styles.notice, { flexDirection: ar ? 'row-reverse' : 'row' }]}
+    >
+      <View style={styles.noticeIcon}>
+        <AppIcon name="check" size={16} color="#FFFFFF" />
+      </View>
+      <View>
+        <Text style={[styles.noticeTitle, { textAlign: ar ? 'right' : 'left' }]}>{title}</Text>
+        <Text style={[styles.noticeDetail, { textAlign: ar ? 'right' : 'left' }]}>{detail}</Text>
+      </View>
+    </View>
   );
 }
 
@@ -193,6 +253,30 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: SHASHTNA_THEME.colors.background },
   container: { flex: 1, backgroundColor: SHASHTNA_THEME.colors.backgroundDeep },
   page: { flex: 1 },
+  notice: {
+    position: 'absolute',
+    top: 22,
+    alignSelf: 'center',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(52,211,153,0.45)',
+    backgroundColor: 'rgba(6,24,20,0.94)',
+    boxShadow: '0px 12px 32px rgba(0,0,0,0.35)',
+  },
+  noticeIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: SHASHTNA_THEME.colors.success,
+  },
+  noticeTitle: { color: '#FFFFFF', fontSize: 15, fontWeight: '800', fontFamily: SHASHTNA_FONT.sans },
+  noticeDetail: { color: 'rgba(255,255,255,0.78)', fontSize: 13, fontWeight: '600', fontFamily: SHASHTNA_FONT.sans, marginTop: 2 },
 });
 
 /** Root of Shashtna Player Lite (registered by index.lite.js). */

@@ -23,12 +23,18 @@ import { looksLikePlaylistName, PickedPlaylist, pickPlaylistFile } from '../../l
 import type { Edition } from '../../app/edition';
 
 /** How the IPTV subscription is provided. The connection type shown is always "IPTV". */
-type Method = 'account' | 'url' | 'file';
+export type ConnectionMethod = 'account' | 'url' | 'file';
+type Method = ConnectionMethod;
+
 
 type Props = {
   onConnected: (channels: M3UChannel[], source: string) => void;
   /** What to load: live only (Lite) or live + VOD (Full). */
   edition: Edition;
+  /** Tab to open on (e.g. the file tab after a saved file could not be reloaded). */
+  initialMethod?: Method;
+  /** Why the saved source could not be restored; shown until the user acts. */
+  restoreError?: unknown;
 };
 
 async function checkNetworkConnection(): Promise<boolean> {
@@ -63,13 +69,23 @@ const TAGLINE = { ar: 'كل ما تحب، على شاشة واحدة.', en: 'Eve
  * One connection type is shown to users: "IPTV". It can be provided three ways,
  * all loaded by the same downloadAndParseM3U into the same channel model:
  * - account: server + username + password (Xtream API, via buildXtreamM3UUrl);
- * - url: an M3U / M3U8 playlist link (a pasted Xtream get.php link is
- *   recognised and loaded through the API);
+ * - url (Full only, supplied as edition.playlistLink): an M3U / M3U8
+ *   playlist link (see playlistLink.ts);
  * - file: an .m3u / .m3u8 file picked with the system file picker, streamed
  *   from its content:// URI (never loaded into memory whole).
+ *
+ * Shashtna Player Lite shows only account + file (no M3U link field), and
+ * imports a file as soon as it is picked: pick → read → parse (live channels
+ * only) → onConnected, which opens Live TV with the imported channels.
  */
-export default function ConnectionScreen({ onConnected, edition }: Props) {
+export default function ConnectionScreen({ onConnected, edition, initialMethod, restoreError }: Props) {
   const liveOnly = edition.liveOnly;
+  // The M3U link method exists only when the edition supplies it (Full). Lite
+  // offers the account and a local M3U file.
+  const link = edition.playlistLink;
+  const methods: Method[] = link ? ['account', 'url', 'file'] : ['account', 'file'];
+  // Lite: picking a file imports it right away (no separate sign-in step).
+  const importOnPick = liveOnly;
   const { language, setLanguage } = useAppPreferences();
   const ar = language === 'ar';
   const palette = usePalette();
@@ -79,7 +95,7 @@ export default function ConnectionScreen({ onConnected, edition }: Props) {
   const rowDirection = ar ? 'row-reverse' : 'row';
   const align = ar ? 'right' : 'left';
 
-  const [method, setMethod] = useState<Method>('account');
+  const [method, setMethod] = useState<Method>(initialMethod && methods.includes(initialMethod) ? initialMethod : 'account');
   const [playlistUrl, setPlaylistUrl] = useState('');
   const [pickedFile, setPickedFile] = useState<PickedPlaylist | null>(null);
   const [server, setServer] = useState('');
@@ -90,7 +106,9 @@ export default function ConnectionScreen({ onConnected, edition }: Props) {
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [count, setCount] = useState(0);
-  const [error, setError] = useState<{ message: string; technical: string } | null>(null);
+  const [error, setError] = useState<{ message: string; technical: string } | null>(() =>
+    restoreError ? describeConnectionError(restoreError, ar) : null,
+  );
   const [showTechnical, setShowTechnical] = useState(false);
 
   const [networkConnected, setNetworkConnected] = useState<boolean | null>(null);
@@ -109,7 +127,7 @@ export default function ConnectionScreen({ onConnected, edition }: Props) {
     };
   }, []);
 
-  const connect = async () => {
+  const connect = async (file: PickedPlaylist | null = pickedFile) => {
     try {
       setLoading(true);
       setError(null);
@@ -132,21 +150,16 @@ export default function ConnectionScreen({ onConnected, edition }: Props) {
         const problem = validateServerUrl(cleanServer);
         if (problem) throw new ValidationError(describeServerUrlProblem(problem, ar));
         source = buildXtreamM3UUrl(cleanServer, cleanUsername, password);
-      } else if (method === 'url') {
+      } else if (method === 'url' && link) {
         const cleanUrl = normalizeServerUrl(playlistUrl);
         if (cleanUrl !== playlistUrl) setPlaylistUrl(cleanUrl);
-        if (!cleanUrl) {
-          throw new ValidationError(ar ? 'أدخل رابط قائمة التشغيل.' : 'Enter the playlist link.');
-        }
-        const problem = validateServerUrl(cleanUrl);
-        if (problem) throw new ValidationError(describeServerUrlProblem(problem, ar));
-        source = cleanUrl;
+        source = link.resolve(cleanUrl, ar);
       } else {
-        if (!pickedFile) {
+        if (!file) {
           throw new ValidationError(ar ? 'اختر ملف قائمة التشغيل أولاً.' : 'Choose a playlist file first.');
         }
-        source = pickedFile.uri;
-        sizeHint = pickedFile.size > 0 ? pickedFile.size : undefined;
+        source = file.uri;
+        sizeHint = file.size > 0 ? file.size : undefined;
       }
 
       const channels = await downloadAndParseM3U(
@@ -162,11 +175,25 @@ export default function ConnectionScreen({ onConnected, edition }: Props) {
         );
       }
 
+      if (method === 'file') setProgress(100);
       onConnected(channels, source);
     } catch (e) {
       setError(describeConnectionError(e, ar));
     } finally {
       setLoading(false);
+    }
+  };
+
+  /** Opens the system picker; in Lite the picked file is imported right away. */
+  const pickFile = async () => {
+    setError(null);
+    try {
+      const picked = await pickPlaylistFile();
+      if (!picked) return; // cancelled
+      setPickedFile(picked);
+      if (importOnPick) await connect(picked);
+    } catch (e) {
+      setError(describeConnectionError(e, ar));
     }
   };
 
@@ -268,27 +295,27 @@ export default function ConnectionScreen({ onConnected, edition }: Props) {
       </View>
 
       <View style={styles.heading}>
-        <Text style={[styles.cardTitle, { color: palette.text, textAlign: align }]}>{ar ? 'تسجيل الدخول' : 'Sign in'}</Text>
+        <Text style={[styles.cardTitle, { color: palette.text, textAlign: align }]}>{importOnPick && method === 'file' ? (ar ? 'استيراد ملف M3U' : 'Import an M3U file') : ar ? 'تسجيل الدخول' : 'Sign in'}</Text>
         <Text style={[styles.cardSub, { color: palette.muted, textAlign: align }]}>
           {method === 'account'
             ? ar ? 'أدخل بيانات اشتراكك وابدأ المشاهدة فوراً.' : 'Enter your subscription details to start watching.'
-            : method === 'url'
-              ? ar ? 'الصق رابط قائمة التشغيل من مزود الخدمة.' : 'Paste the playlist link from your provider.'
+            : method === 'url' && link
+              ? link.subtitle(ar)
               : ar ? 'اختر ملف قائمة التشغيل من جهازك.' : 'Choose a playlist file from this device.'}
         </Text>
       </View>
 
-      <MethodTabs method={method} onChange={next => { setMethod(next); setError(null); }} palette={palette} ar={ar} disabled={loading} />
+      <MethodTabs methods={methods} linkLabel={link?.tabLabel(ar)} method={method} onChange={next => { setMethod(next); setError(null); }} palette={palette} ar={ar} disabled={loading} />
 
-      {method === 'url' ? (
+      {method === 'url' && link ? (
         <View style={styles.fields}>
           <Field
-            label={ar ? 'رابط قائمة التشغيل (M3U)' : 'Playlist link (M3U)'}
+            label={link.fieldLabel(ar)}
             onEndEditing={() => setPlaylistUrl(value => normalizeServerUrl(value))}
             icon="link"
             value={playlistUrl}
             onChangeText={setPlaylistUrl}
-            placeholder="http://provider.tv/playlist.m3u"
+            placeholder={link.placeholder}
             palette={palette}
             ar={ar}
             ltrValue
@@ -301,15 +328,7 @@ export default function ConnectionScreen({ onConnected, edition }: Props) {
         <FilePickerField
           file={pickedFile}
           disabled={loading}
-          onPick={async () => {
-            setError(null);
-            try {
-              const picked = await pickPlaylistFile();
-              if (picked) setPickedFile(picked);
-            } catch (e) {
-              setError(describeConnectionError(e, ar));
-            }
-          }}
+          onPick={pickFile}
           palette={palette}
           ar={ar}
         />
@@ -360,7 +379,7 @@ export default function ConnectionScreen({ onConnected, edition }: Props) {
         focusable
         disabled={loading}
         accessibilityRole="button"
-        onPress={connect}
+        onPress={() => (importOnPick && method === 'file' && !pickedFile ? pickFile() : connect())}
         style={({ focused, pressed }) => [
           styles.connect,
           {
@@ -375,7 +394,15 @@ export default function ConnectionScreen({ onConnected, edition }: Props) {
       >
         {loading ? <ActivityIndicator color="#FFFFFF" /> : null}
         <Text style={styles.connectText}>
-          {loading ? (ar ? 'جاري تحميل المحتوى...' : 'Loading content...') : ar ? 'تسجيل الدخول' : 'Sign in'}
+          {loading
+            ? method === 'file'
+              ? ar ? 'جاري قراءة ملف M3U...' : 'Reading the M3U file...'
+              : ar ? 'جاري تحميل المحتوى...' : 'Loading content...'
+            : importOnPick && method === 'file'
+              ? pickedFile
+                ? ar ? 'استيراد الملف مرة ثانية' : 'Import the file again'
+                : ar ? 'اختيار ملف M3U' : 'Choose an M3U file'
+              : ar ? 'تسجيل الدخول' : 'Sign in'}
         </Text>
         {!loading ? (
           <View style={ar ? styles.flipX : undefined}>
@@ -403,7 +430,9 @@ export default function ConnectionScreen({ onConnected, edition }: Props) {
         <View style={[styles.error, { flexDirection: rowDirection }]}>
           <AppIcon name="info" size={18} color={SHASHTNA_THEME.colors.danger} />
           <View style={styles.errorCopy}>
-            <Text style={[styles.errorTitle, { textAlign: align }]}>{ar ? 'تعذر تسجيل الدخول' : 'Sign-in failed'}</Text>
+            <Text style={[styles.errorTitle, { textAlign: align }]}>
+              {method === 'file' ? (ar ? 'تعذر استيراد ملف M3U' : 'M3U import failed') : ar ? 'تعذر تسجيل الدخول' : 'Sign-in failed'}
+            </Text>
             <Text style={[styles.errorBody, { color: palette.secondary, textAlign: align }]}>{error.message}</Text>
             {error.technical ? (
               <Pressable focusable onPress={() => setShowTechnical(v => !v)} style={({ focused }) => [styles.techToggle, focused && { borderColor: palette.focus }]}>
@@ -458,23 +487,29 @@ export default function ConnectionScreen({ onConnected, edition }: Props) {
 }
 
 function MethodTabs({
+  methods,
+  linkLabel,
   method,
   onChange,
   palette,
   ar,
   disabled,
 }: {
+  methods: Method[];
+  /** Label of the M3U link tab, when the edition has one. */
+  linkLabel?: string;
   method: Method;
   onChange: (method: Method) => void;
   palette: Palette;
   ar: boolean;
   disabled: boolean;
 }) {
-  const tabs: Array<{ id: Method; label: string; icon: AppIconName }> = [
+  const allTabs: Array<{ id: Method; label: string; icon: AppIconName }> = [
     { id: 'account', label: ar ? 'بيانات الحساب' : 'Account', icon: 'user' },
-    { id: 'url', label: ar ? 'رابط M3U' : 'M3U link', icon: 'link' },
+    { id: 'url', label: linkLabel || '', icon: 'link' },
     { id: 'file', label: ar ? 'ملف M3U' : 'M3U file', icon: 'folder' },
   ];
+  const tabs = allTabs.filter(tab => methods.includes(tab.id));
   return (
     <View
       accessibilityRole="tablist"

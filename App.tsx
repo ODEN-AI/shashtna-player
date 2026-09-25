@@ -29,6 +29,7 @@ import { indexMedia } from './src/features/catalog/mediaCatalog';
 import Sidebar from './src/navigation/Sidebar';
 import { screenMemory } from './src/navigation/tvFocus';
 import ConnectionScreen from './src/screens/Connection/ConnectionScreen';
+import { PLAYLIST_LINK } from './src/screens/Connection/playlistLink';
 import FavoritesScreen from './src/screens/Favorites/FavoritesScreen';
 import HomeScreen from './src/screens/Home/HomeScreen';
 import LiveScreen from './src/screens/Live/LiveScreen';
@@ -57,7 +58,7 @@ export const EDITION_MARKER = 'shashtna-edition:full';
 setPlaybackResumeStore({ ensureLoaded: ensureContinueWatchingLoaded, getResumePosition, recordProgress });
 
 /** Full edition: live + movies + series. */
-const FULL_EDITION: Edition = { id: 'full', liveOnly: false, loadVod: loadXtreamVod, indexMedia };
+const FULL_EDITION: Edition = { id: 'full', liveOnly: false, loadVod: loadXtreamVod, indexMedia, playlistLink: PLAYLIST_LINK };
 
 function getNavItems(language: AppLanguage): NavItem[] {
   const ar = language === 'ar';

@@ -21,17 +21,42 @@ export function describeConnectionError(error: unknown, ar: boolean): { message:
   if (name === 'PlaylistFormatError') {
     return {
       message: pick0(
-        'الملف مو قائمة تشغيل M3U. اختر ملف ‎.m3u أو ‎.m3u8 صحيح.',
-        'This file is not an M3U playlist. Choose a valid .m3u or .m3u8 file.',
+        'صيغة الملف غير مدعومة. اختر ملف قائمة تشغيل ‎.m3u أو ‎.m3u8 صحيح.',
+        'Unsupported file format. Choose a valid .m3u or .m3u8 playlist.',
       ),
       technical: '',
+    };
+  }
+  if (name === 'PlaylistEmptyError') {
+    return {
+      message: pick0('الملف فارغ. اختر ملف M3U يحتوي على قنوات.', 'The file is empty. Choose an M3U file that contains channels.'),
+      technical: '',
+    };
+  }
+  if (name === 'NoLiveChannelsError') {
+    return {
+      message: pick0(
+        'لم يتم العثور على قنوات مباشرة داخل الملف. شاشتنا Lite تعرض البث المباشر فقط.',
+        'No live TV channels were found in the file. Shashtna Player Lite shows live TV only.',
+      ),
+      technical: '',
+    };
+  }
+  if (name === 'PlaylistReadError') {
+    const detail = error instanceof Error ? error.message : '';
+    return {
+      message: pick0(
+        'تعذر قراءة ملف M3U. ربما انحذف الملف أو انسحبت صلاحية الوصول إليه. اختر الملف مرة ثانية.',
+        'The M3U file could not be read. It may have been removed or access was revoked. Choose the file again.',
+      ),
+      technical: redactSecrets(detail).slice(0, 300),
     };
   }
   if (name === 'PickerUnavailableError') {
     return {
       message: pick0(
-        'ما في مدير ملفات على هذا الجهاز لاختيار الملف. استخدم رابط القائمة بدلاً من ذلك.',
-        'This device has no file picker. Use the playlist link instead.',
+        'ما في مدير ملفات على هذا الجهاز لاختيار الملف. ثبّت تطبيق مدير ملفات، أو سجّل الدخول ببيانات الحساب.',
+        'This device has no file picker. Install a file manager app, or sign in with your account details.',
       ),
       technical: '',
     };
@@ -45,7 +70,7 @@ export function describeConnectionError(error: unknown, ar: boolean): { message:
   if (/permission denial|securityexception|no content provider|filenotfound|no such file|enoent/.test(text)) {
     return {
       message: pick(
-        'تعذر قراءة ملف القائمة. ربما انحذف أو انسحبت صلاحية الوصول. استورد الملف مرة ثانية.',
+        'تعذر قراءة ملف M3U. ربما انحذف الملف أو انسحبت صلاحية الوصول إليه. اختر الملف مرة ثانية.',
         'The playlist file could not be read. It may have been removed or access was revoked. Import it again.',
       ),
       technical,

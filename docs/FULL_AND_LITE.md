@@ -13,6 +13,7 @@ One codebase, two Android apps.
 | Xtream requests on load | 6 (live, VOD, series + categories) | 2 (live + live categories) |
 | Favorites | Favorites page + Favorites category in Live TV | channel-level only (long-press OK, heart on the card); no page or category |
 | Stored library cache | live, movies, series | live rows only |
+| Sign-in methods | Account, M3U link, M3U file | Account, M3U file (no M3U link field) |
 
 The two apps have different applicationIds, so both can be installed on the
 same TV box or phone at the same time, each with its own login, cache and
@@ -110,11 +111,14 @@ favorites, theme/accent, Arabic RTL, TV focus rules.
 ## Connecting (IPTV)
 
 The connection type shown to users is always **IPTV**, provided in one of
-three ways:
+these ways:
 
 1. **Account** — server, username, password (Xtream API).
-2. **M3U link** — a playlist URL. A pasted Xtream `get.php?username=…` link is
-   recognised and loaded through the API.
+2. **M3U link** (Full only) — a playlist URL. A pasted Xtream
+   `get.php?username=…` link is recognised and loaded through the API. The
+   method lives in `src/screens/Connection/playlistLink.ts` and is passed in
+   by `App.tsx` as `edition.playlistLink`; Lite has no link tab or field, and
+   the module is not in the Lite bundle.
 3. **M3U file** — an `.m3u` / `.m3u8` file picked with the system file picker.
 
 ### Server address normalisation
@@ -129,20 +133,45 @@ connecting and the saved source:
 
 ### M3U file import
 
+Flow in Shashtna Player Lite: **ملف M3U** tab → choose the file → it is read,
+parsed (live channels only), saved and Live TV opens with the imported
+channels and a confirmation («تم تحميل ملف M3U بنجاح» · «عدد القنوات: N»).
+There is no separate sign-in step. In Full, the picked file is loaded when
+the user presses Sign in (unchanged).
+
 - The picker is a small native module (`PlaylistPickerModule.kt`, platform
   APIs only). It uses `ACTION_OPEN_DOCUMENT`, and falls back to
   `ACTION_GET_CONTENT` on TV boxes without the Documents UI. If a device has
-  no file manager at all, the user is told to use the link instead.
-- The picked `content://` URI is streamed (256 KB chunks) and parsed line by
-  line; the file is never copied or loaded into memory whole. UTF-8 is decoded
-  natively, so Arabic names are not broken at chunk boundaries.
+  no file manager at all, the user is told so (it is started directly, not
+  through an empty chooser that would come back as a silent cancel).
+- The same module reads the picked URI (`openPlaylist` /
+  `readPlaylistChunk` / `closePlaylist`): UTF-8 text straight from the
+  `ContentResolver`, pulled by JS 256 K characters at a time; the file is
+  never copied or loaded into memory whole, and Arabic names are never split
+  between chunks.
+- Picked files are **not** read through `react-native-blob-util`. Its
+  `readStream` first converts `content://` URIs into file paths
+  (`PathResolver.getRealPathFromURI`): `…externalstorage.documents/…/primary:Download/x.m3u`
+  becomes a path inside the app's own external files folder (a file that does
+  not exist), and Downloads `raw:` / MediaStore documents become
+  `/storage/…` paths that scoped storage does not let the app open. That is
+  why an imported M3U used to load nothing.
+- Errors are specific: «تعذر قراءة ملف M3U» (cannot be opened), «الملف فارغ»,
+  «صيغة الملف غير مدعومة» (no `#EXTM3U` / `#EXTINF`), and in Lite «لم يتم
+  العثور على قنوات مباشرة داخل الملف».
+- Lite classifies entries by the stream URL first (`/live/`, `.ts` → live;
+  `/movie/`, `/series/`, video-file extensions → VOD), then by name keywords,
+  so live channels such as "beIN Movies" are kept. Full keeps its existing
+  keyword classification.
 - Progress shows the percentage read and the number of entries found.
 - Files are validated (`#EXTM3U` / `#EXTINF`); anything else is rejected with
   a clear message. Logos (`tvg-logo`), groups (`group-title`), `tvg-id` and
   `tvg-name` are kept.
-- A persistable read permission is taken when the provider offers it, so the
+- A persistable read permission is taken when the provider offers it, and the
+  file's URI is saved like any other source (`connectionSession.ts`), so the
   library reloads from the same file on the next launch. If the file was
-  deleted or access was revoked, the app returns to the connection screen.
+  deleted or access was revoked, the app returns to the connection screen on
+  the M3U file tab with «تعذر قراءة ملف M3U …» instead of failing silently.
 - Imported files use the same parser and data model as playlist links.
 
 ## Performance architecture

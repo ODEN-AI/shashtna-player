@@ -61,6 +61,8 @@ const FULL_ONLY = [
   'src/features/ads/HeroCarousel.tsx',
   'src/features/ads/advertisementRepository.ts',
   'src/features/ads/localAdvertisements.ts',
+  // Lite imports a local M3U file only; the M3U link method is Full's.
+  'src/screens/Connection/playlistLink.ts',
 ];
 
 describe('Lite entry and import graph', () => {

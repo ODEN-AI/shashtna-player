@@ -1,5 +1,7 @@
 import ReactNativeBlobUtil from 'react-native-blob-util';
 
+import { hasNativePlaylistReader, readPlaylistFile } from './playlistPicker';
+
 export type M3UContentType =
   | 'live'
   | 'movie'
@@ -329,11 +331,32 @@ function parseAttribute(
   );
 }
 
+/**
+ * What the stream URL itself says the entry is, when it says it clearly:
+ * Xtream-style /live/, /movie/, /series/ paths, `.ts` live streams, or a
+ * video-file extension. null when the URL gives no signal.
+ */
+export function contentTypeFromUrl(url: string): M3UContentType | null {
+  const path = url.trim().split(/[?#]/)[0].toLowerCase();
+  if (/\/live\//.test(path) || /\.ts$/.test(path)) return 'live';
+  if (/\/series\//.test(path)) return 'series';
+  if (/\/movies?\//.test(path) || /\.(mp4|mkv|avi|mov|wmv|flv|webm)$/.test(path)) return 'movie';
+  return null;
+}
+
 function classifyPlainM3UEntry(
   name: string,
   group: string,
   url: string,
+  urlFirst = false,
 ): M3UContentType {
+  // Lite trusts a clear URL over name keywords, so live channels such as
+  // "beIN Movies" (…/live/…/12.ts) are kept and VOD files are dropped.
+  if (urlFirst) {
+    const fromUrl = contentTypeFromUrl(url);
+    if (fromUrl) return fromUrl;
+  }
+
   const text =
     `${name} ${group} ${url}`.toLowerCase();
 
@@ -384,6 +407,7 @@ export function createPlainM3UChannel(
   line: string,
   url: string,
   index: number,
+  urlFirst = false,
 ): M3UChannel {
   const name =
     line
@@ -423,6 +447,7 @@ export function createPlainM3UChannel(
       name,
       group,
       url,
+      urlFirst,
     );
 
   return {
@@ -458,10 +483,12 @@ export function createM3UTextParser(
   let buffer = '';
   let pendingExtInf = '';
   let sawHeaderOrEntry = false;
+  let sawText = false;
 
   const handleLine = (rawLine: string) => {
     const line = rawLine.trim();
     if (!line) return;
+    sawText = true;
     if (line.startsWith('#EXTINF:')) {
       pendingExtInf = line;
       sawHeaderOrEntry = true;
@@ -472,7 +499,7 @@ export function createM3UTextParser(
       return;
     }
     if (!pendingExtInf) return;
-    const channel = createPlainM3UChannel(pendingExtInf, line, entryIndex);
+    const channel = createPlainM3UChannel(pendingExtInf, line, entryIndex, options.liveOnly);
     entryIndex += 1;
     pendingExtInf = '';
     if (options.liveOnly && channel.contentType !== 'live') return;
@@ -495,14 +522,47 @@ export function createM3UTextParser(
     },
     /** True once an #EXTM3U header or #EXTINF entry was seen. */
     looksLikeM3U: () => sawHeaderOrEntry,
+    /** Entries read (before liveOnly filtering), channels kept, any non-blank text. */
+    stats: () => ({ entries: entryIndex, kept: channels.length, sawText }),
   };
 }
+
+type TextParser = ReturnType<typeof createM3UTextParser>;
 
 export class PlaylistFormatError extends Error {
   constructor() {
     super('The file is not an M3U playlist (no #EXTM3U / #EXTINF lines found).');
     this.name = 'PlaylistFormatError';
   }
+}
+
+/** The playlist has no content at all. */
+export class PlaylistEmptyError extends Error {
+  constructor() {
+    super('The playlist file is empty.');
+    this.name = 'PlaylistEmptyError';
+  }
+}
+
+/** A valid playlist, but nothing in it is a live channel (Lite). */
+export class NoLiveChannelsError extends Error {
+  constructor() {
+    super('The playlist contains no live TV channels.');
+    this.name = 'NoLiveChannelsError';
+  }
+}
+
+/**
+ * Ends a parse and turns "nothing usable" into a specific error: an empty
+ * file, text that is not M3U, or (Lite) a playlist without live channels.
+ */
+function finishPlaylist(parser: TextParser, options: ParseOptions): M3UChannel[] {
+  const channels = parser.end();
+  const stats = parser.stats();
+  if (!stats.sawText) throw new PlaylistEmptyError();
+  if (!channels.length && !parser.looksLikeM3U()) throw new PlaylistFormatError();
+  if (options.liveOnly && !channels.length) throw new NoLiveChannelsError();
+  return channels;
 }
 
 /*
@@ -573,20 +633,33 @@ async function parsePlainM3UFile(
 
       stream.onEnd(() => {
         try {
-          const channels = parser.end();
-          if (!channels.length && !parser.looksLikeM3U()) {
-            reject(new PlaylistFormatError());
-            return;
-          }
-          resolve(
-            channels,
-          );
+          resolve(finishPlaylist(parser, options));
         } catch (error) {
           reject(error);
         }
       });
     },
   );
+}
+
+/**
+ * Reads a picked playlist through the app's own ContentResolver reader
+ * (playlistPicker.readPlaylistFile). content:// URIs must not go through
+ * react-native-blob-util: it rewrites them to file paths that do not exist or
+ * cannot be opened (see PlaylistPickerModule.kt).
+ */
+async function parseLocalPlaylist(
+  uri: string,
+  onChannelCount?: (count: number) => void,
+  options: ParseOptions = {},
+  onBytes?: (received: number) => void,
+): Promise<M3UChannel[]> {
+  const parser = createM3UTextParser(options, onChannelCount);
+  await readPlaylistFile(uri, (text, bytesRead) => {
+    parser.push(text);
+    onBytes?.(bytesRead);
+  });
+  return finishPlaylist(parser, options);
 }
 
 export function getCategoryNameMap(
@@ -809,9 +882,10 @@ export async function downloadAndParseM3U(
     // Read straight from the picked document; nothing is copied or buffered whole.
     const total = options.sizeHint || 0;
     onProgress?.(0, total);
-    const channels = await parsePlainM3UFile(url.trim(), onChannelCount, options, received =>
-      onProgress?.(total ? Math.min(received, total) : received, total),
-    );
+    const report = (received: number) => onProgress?.(total ? Math.min(received, total) : received, total);
+    const channels = hasNativePlaylistReader()
+      ? await parseLocalPlaylist(url.trim(), onChannelCount, options, report)
+      : await parsePlainM3UFile(url.trim(), onChannelCount, options, report);
     onProgress?.(total, total);
     return channels;
   }

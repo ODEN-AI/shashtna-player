@@ -10,6 +10,7 @@ import {
   downloadAndParseM3U,
   getXtreamSessionFromSource,
   M3UChannel,
+  NoLiveChannelsError,
 } from '../lib/m3u';
 
 /**
@@ -23,8 +24,17 @@ import {
  */
 export type LibraryStatus = 'restoring' | 'indexing' | 'disconnected' | 'ready';
 
+/** Why the library went back to 'disconnected', and for which source. */
+export type LibraryFailure = { error: unknown; source: string };
+
 export type LibrarySession = {
   status: LibraryStatus;
+  /**
+   * Set when a saved source could not be restored (e.g. an imported M3U file
+   * that was deleted or whose access was revoked) or a connected source
+   * produced nothing usable. Cleared by the next connect.
+   */
+  failure: LibraryFailure | null;
   catalog: Catalog;
   source: string;
   /** Called by the connection screen after it downloaded and parsed a source. */
@@ -39,6 +49,7 @@ export function useLibrarySession(edition: Edition): LibrarySession {
   const [status, setStatus] = useState<LibraryStatus>('restoring');
   const [catalog, setCatalog] = useState<Catalog>(emptyCatalog);
   const [source, setSource] = useState('');
+  const [failure, setFailure] = useState<LibraryFailure | null>(null);
   const generation = useRef(0);
 
   const install = useCallback(
@@ -48,6 +59,7 @@ export function useLibrarySession(edition: Edition): LibrarySession {
       const next = await buildCatalogAsync(channels, { liveOnly, indexMedia });
       if (run !== generation.current) return;
       if (!next.all.length || (liveOnly && !next.live.length)) {
+        setFailure({ error: new NoLiveChannelsError(), source: nextSource });
         setStatus('disconnected');
         return;
       }
@@ -63,9 +75,11 @@ export function useLibrarySession(edition: Edition): LibrarySession {
 
   useEffect(() => {
     let alive = true;
+    let savedSource = '';
     (async () => {
       try {
         const saved = await loadConnectionSource();
+        savedSource = saved || '';
         if (!saved) {
           if (alive) setStatus('disconnected');
           return;
@@ -83,7 +97,10 @@ export function useLibrarySession(edition: Edition): LibrarySession {
         await install(channels, saved, true);
       } catch (error) {
         console.warn('[Shashtna] Saved connection restore failed:', error);
-        if (alive) setStatus('disconnected');
+        if (alive) {
+          setFailure({ error, source: savedSource });
+          setStatus('disconnected');
+        }
       }
     })();
     return () => {
@@ -93,6 +110,7 @@ export function useLibrarySession(edition: Edition): LibrarySession {
 
   const connect = useCallback(
     async (channels: M3UChannel[], nextSource: string) => {
+      setFailure(null);
       void saveConnectionSource(nextSource);
       await install(channels, nextSource, true);
     },
@@ -101,6 +119,7 @@ export function useLibrarySession(edition: Edition): LibrarySession {
 
   const disconnect = useCallback(() => {
     generation.current += 1;
+    setFailure(null);
     void clearConnectionSource();
     void clearLibraryCache();
     clearXtreamSession();
@@ -122,5 +141,5 @@ export function useLibrarySession(edition: Edition): LibrarySession {
     }
   }, [install, liveOnly, loadVod, source]);
 
-  return { status, catalog, source, connect, disconnect, refresh };
+  return { status, failure, catalog, source, connect, disconnect, refresh };
 }

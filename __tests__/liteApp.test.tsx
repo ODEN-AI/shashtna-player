@@ -21,7 +21,7 @@ jest.mock('../src/app/useLibrarySession', () => ({
 
 const LiteApp = require('../src/variants/lite/LiteApp').default;
 
-const base = { source: '', connect: jest.fn(), disconnect: jest.fn(), refresh: jest.fn() };
+const base = { source: '', failure: null, connect: jest.fn(), disconnect: jest.fn(), refresh: jest.fn() };
 
 function texts(tree: ReactTestRenderer.ReactTestRenderer): string[] {
   return tree.root
