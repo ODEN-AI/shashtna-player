@@ -5,15 +5,17 @@ One codebase, two Android apps.
 | | Shashtna Player (Full) | Shashtna Player Lite |
 |---|---|---|
 | Content | Live TV, Movies, Series | Live TV only |
+| Content source | Xtream account, M3U link, M3U file | a local M3U file only («رفع ملف M3U») |
 | Android flavor | `full` | `lite` |
 | applicationId | `com.shashtnaplayer` (unchanged) | `com.shashtnaplayer.lite` |
 | Launcher name | Shashtna Player | Shashtna Player Lite |
 | JS entry | `index.js` → `App.tsx` | `index.lite.js` → `src/variants/lite/LiteApp.tsx` |
 | Pages | Home, Live TV, Movies, Series, Favorites, Settings | البث المباشر (Live TV, start page), الإعدادات (Settings) — nothing else |
-| Xtream requests on load | 6 (live, VOD, series + categories) | 2 (live + live categories) |
+| Xtream requests on load | 6 (live, VOD, series + categories) | none (no Xtream in Lite) |
 | Favorites | Favorites page + Favorites category in Live TV | channel-level only (long-press OK, heart on the card); no page or category |
 | Stored library cache | live, movies, series | live rows only |
-| Sign-in methods | Account, M3U link, M3U file | Account, M3U file (no M3U link field) |
+| Sign-in methods | Account, M3U link, M3U file | none: «استيراد ملف M3U» screen with one action, «رفع ملف M3U» |
+| Settings → source | Change source (sign in again) | «مصدر المحتوى»: current file, channel count, «استبدال ملف M3U», re-read |
 
 The two apps have different applicationIds, so both can be installed on the
 same TV box or phone at the same time, each with its own login, cache and
@@ -110,8 +112,17 @@ favorites, theme/accent, Arabic RTL, TV focus rules.
 
 ## Connecting (IPTV)
 
-The connection type shown to users is always **IPTV**, provided in one of
-these ways:
+Shashtna Player Lite has no sign-in. Its only source is a local M3U file:
+`src/variants/lite/LiteImportScreen.tsx` («استيراد ملف M3U» → «رفع ملف M3U»),
+`useLitePlaylist.ts` (import, save, restore) and `LiteSourceSection.tsx`
+(Settings). Lite imports the parser and file reader from `src/lib/m3uCore.ts`
+only; the Xtream/URL loader (`src/lib/m3u.ts`), the Full connection screen,
+`playlistLink.ts`, `serverUrl.ts` and the Xtream library cache are not in the
+Lite bundle (`__tests__/liteBoundaries.test.ts`). A source saved by an older
+Lite build that is not a local file is dropped on launch.
+
+In Shashtna Player (Full) the connection type shown to users is always
+**IPTV**, provided in one of these ways:
 
 1. **Account** — server, username, password (Xtream API).
 2. **M3U link** (Full only) — a playlist URL. A pasted Xtream
@@ -133,11 +144,12 @@ connecting and the saved source:
 
 ### M3U file import
 
-Flow in Shashtna Player Lite: **ملف M3U** tab → choose the file → it is read,
+Flow in Shashtna Player Lite: **رفع ملف M3U** → choose the file → it is read,
 parsed (live channels only), saved and Live TV opens with the imported
 channels and a confirmation («تم تحميل ملف M3U بنجاح» · «عدد القنوات: N»).
-There is no separate sign-in step. In Full, the picked file is loaded when
-the user presses Sign in (unchanged).
+Settings → «استبدال ملف M3U» runs the same import; a file that fails keeps
+the current playlist. In Full, the picked file is loaded when the user
+presses Sign in (unchanged).
 
 - The picker is a small native module (`PlaylistPickerModule.kt`, platform
   APIs only). It uses `ACTION_OPEN_DOCUMENT`, and falls back to
@@ -170,8 +182,8 @@ the user presses Sign in (unchanged).
 - A persistable read permission is taken when the provider offers it, and the
   file's URI is saved like any other source (`connectionSession.ts`), so the
   library reloads from the same file on the next launch. If the file was
-  deleted or access was revoked, the app returns to the connection screen on
-  the M3U file tab with «تعذر قراءة ملف M3U …» instead of failing silently.
+  deleted or access was revoked, Lite returns to «استيراد ملف M3U» with
+  «تعذر قراءة ملف M3U …» and the file name, instead of failing silently.
 - Imported files use the same parser and data model as playlist links.
 
 ## Performance architecture

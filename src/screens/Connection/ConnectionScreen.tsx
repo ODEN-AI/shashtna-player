@@ -31,10 +31,6 @@ type Props = {
   onConnected: (channels: M3UChannel[], source: string) => void;
   /** What to load: live only (Lite) or live + VOD (Full). */
   edition: Edition;
-  /** Tab to open on (e.g. the file tab after a saved file could not be reloaded). */
-  initialMethod?: Method;
-  /** Why the saved source could not be restored; shown until the user acts. */
-  restoreError?: unknown;
 };
 
 async function checkNetworkConnection(): Promise<boolean> {
@@ -74,18 +70,15 @@ const TAGLINE = { ar: 'كل ما تحب، على شاشة واحدة.', en: 'Eve
  * - file: an .m3u / .m3u8 file picked with the system file picker, streamed
  *   from its content:// URI (never loaded into memory whole).
  *
- * Shashtna Player Lite shows only account + file (no M3U link field), and
- * imports a file as soon as it is picked: pick → read → parse (live channels
- * only) → onConnected, which opens Live TV with the imported channels.
+ * Shashtna Player (Full) only. Shashtna Player Lite has no sign-in: its only
+ * source is a local M3U file (src/variants/lite/LiteImportScreen.tsx).
  */
-export default function ConnectionScreen({ onConnected, edition, initialMethod, restoreError }: Props) {
+export default function ConnectionScreen({ onConnected, edition }: Props) {
   const liveOnly = edition.liveOnly;
   // The M3U link method exists only when the edition supplies it (Full). Lite
   // offers the account and a local M3U file.
   const link = edition.playlistLink;
   const methods: Method[] = link ? ['account', 'url', 'file'] : ['account', 'file'];
-  // Lite: picking a file imports it right away (no separate sign-in step).
-  const importOnPick = liveOnly;
   const { language, setLanguage } = useAppPreferences();
   const ar = language === 'ar';
   const palette = usePalette();
@@ -95,7 +88,7 @@ export default function ConnectionScreen({ onConnected, edition, initialMethod, 
   const rowDirection = ar ? 'row-reverse' : 'row';
   const align = ar ? 'right' : 'left';
 
-  const [method, setMethod] = useState<Method>(initialMethod && methods.includes(initialMethod) ? initialMethod : 'account');
+  const [method, setMethod] = useState<Method>('account');
   const [playlistUrl, setPlaylistUrl] = useState('');
   const [pickedFile, setPickedFile] = useState<PickedPlaylist | null>(null);
   const [server, setServer] = useState('');
@@ -106,9 +99,7 @@ export default function ConnectionScreen({ onConnected, edition, initialMethod, 
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [count, setCount] = useState(0);
-  const [error, setError] = useState<{ message: string; technical: string } | null>(() =>
-    restoreError ? describeConnectionError(restoreError, ar) : null,
-  );
+  const [error, setError] = useState<{ message: string; technical: string } | null>(null);
   const [showTechnical, setShowTechnical] = useState(false);
 
   const [networkConnected, setNetworkConnected] = useState<boolean | null>(null);
@@ -184,14 +175,13 @@ export default function ConnectionScreen({ onConnected, edition, initialMethod, 
     }
   };
 
-  /** Opens the system picker; in Lite the picked file is imported right away. */
+  /** Opens the system picker; the file is loaded when the user signs in. */
   const pickFile = async () => {
     setError(null);
     try {
       const picked = await pickPlaylistFile();
       if (!picked) return; // cancelled
       setPickedFile(picked);
-      if (importOnPick) await connect(picked);
     } catch (e) {
       setError(describeConnectionError(e, ar));
     }
@@ -295,7 +285,7 @@ export default function ConnectionScreen({ onConnected, edition, initialMethod, 
       </View>
 
       <View style={styles.heading}>
-        <Text style={[styles.cardTitle, { color: palette.text, textAlign: align }]}>{importOnPick && method === 'file' ? (ar ? 'استيراد ملف M3U' : 'Import an M3U file') : ar ? 'تسجيل الدخول' : 'Sign in'}</Text>
+        <Text style={[styles.cardTitle, { color: palette.text, textAlign: align }]}>{ar ? 'تسجيل الدخول' : 'Sign in'}</Text>
         <Text style={[styles.cardSub, { color: palette.muted, textAlign: align }]}>
           {method === 'account'
             ? ar ? 'أدخل بيانات اشتراكك وابدأ المشاهدة فوراً.' : 'Enter your subscription details to start watching.'
@@ -379,7 +369,7 @@ export default function ConnectionScreen({ onConnected, edition, initialMethod, 
         focusable
         disabled={loading}
         accessibilityRole="button"
-        onPress={() => (importOnPick && method === 'file' && !pickedFile ? pickFile() : connect())}
+        onPress={() => connect()}
         style={({ focused, pressed }) => [
           styles.connect,
           {
@@ -398,11 +388,7 @@ export default function ConnectionScreen({ onConnected, edition, initialMethod, 
             ? method === 'file'
               ? ar ? 'جاري قراءة ملف M3U...' : 'Reading the M3U file...'
               : ar ? 'جاري تحميل المحتوى...' : 'Loading content...'
-            : importOnPick && method === 'file'
-              ? pickedFile
-                ? ar ? 'استيراد الملف مرة ثانية' : 'Import the file again'
-                : ar ? 'اختيار ملف M3U' : 'Choose an M3U file'
-              : ar ? 'تسجيل الدخول' : 'Sign in'}
+            : ar ? 'تسجيل الدخول' : 'Sign in'}
         </Text>
         {!loading ? (
           <View style={ar ? styles.flipX : undefined}>

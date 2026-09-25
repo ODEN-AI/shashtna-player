@@ -22,7 +22,8 @@ type Props = {
   items: SidebarItem[];
   activeId: string;
   onNavigate: (id: string) => void;
-  onChangeSource: () => void;
+  /** Rail action to sign in with another source (Full). Lite replaces its M3U file in Settings. */
+  onChangeSource?: () => void;
   ar: boolean;
   /** Product name next to the logo (the Lite edition shows its own). */
   brandName?: string;
@@ -187,18 +188,20 @@ function Sidebar({ items, activeId, onNavigate, onChangeSource, ar, brandName = 
           <View style={styles.navGuide}>{nav}</View>
         )}
 
-        <RailButton
-          item={{ id: '__source', label: ar ? 'تغيير المصدر' : 'Change source', icon: 'source' }}
-          selected={false}
-          onPress={onChangeSource}
-          onFocus={handleFocus}
-          onBlur={handleBlur}
-          labelOpacity={labelOpacity}
-          palette={palette}
-          rowDirection={rowDirection}
-          ar={ar}
-          subtle
-        />
+        {onChangeSource ? (
+          <RailButton
+            item={{ id: '__source', label: ar ? 'تغيير المصدر' : 'Change source', icon: 'source' }}
+            selected={false}
+            onPress={onChangeSource}
+            onFocus={handleFocus}
+            onBlur={handleBlur}
+            labelOpacity={labelOpacity}
+            palette={palette}
+            rowDirection={rowDirection}
+            ar={ar}
+            subtle
+          />
+        ) : null}
       </Animated.View>
     </>
   );

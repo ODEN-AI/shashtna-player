@@ -1,4 +1,4 @@
-import type { M3UChannel } from '../../lib/m3u';
+import type { M3UChannel } from '../../lib/m3uCore';
 
 /**
  * Resume / Continue Watching hook-up for the player.

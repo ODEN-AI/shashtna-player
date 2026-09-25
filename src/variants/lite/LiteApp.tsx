@@ -2,24 +2,25 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Animated, StatusBar, StyleSheet, Text, View } from 'react-native';
 
 import AppShell from '../../app/AppShell';
-import type { Edition } from '../../app/edition';
 import LibraryLoadingScreen from '../../app/LibraryLoadingScreen';
 import PlayerHost, { PlayerLaunchOptions } from '../../app/PlayerHost';
 import SplashScreen from '../../app/SplashScreen';
 import { useBackNavigation } from '../../app/useBackNavigation';
-import { useLibrarySession } from '../../app/useLibrarySession';
 import { usePageTransition } from '../../app/usePageTransition';
 import { usePreferencesState } from '../../app/usePreferencesState';
 import AppIcon, { AppIconName } from '../../components/common/AppIcon';
 import { AppLanguage, AppPreferencesProvider } from '../../design/AppPreferencesContext';
 import { BRAND_LITE } from '../../design/brand';
 import { SHASHTNA_FONT, SHASHTNA_THEME } from '../../design/theme';
-import { isLocalPlaylistSource, M3UChannel } from '../../lib/m3u';
+import type { M3UChannel } from '../../lib/m3uCore';
+import type { PickedPlaylist } from '../../lib/playlistPicker';
 import Sidebar from '../../navigation/Sidebar';
 import { screenMemory } from '../../navigation/tvFocus';
-import ConnectionScreen from '../../screens/Connection/ConnectionScreen';
 import LiveScreen from '../../screens/Live/LiveScreen';
 import SettingsScreen, { PreferredQuality } from '../../screens/Settings/SettingsScreen';
+import LiteImportScreen from './LiteImportScreen';
+import LiteSourceSection from './LiteSourceSection';
+import { ImportProgress, useLitePlaylist } from './useLitePlaylist';
 
 /**
  * Shashtna Player Lite: a dedicated Live TV application.
@@ -28,14 +29,16 @@ import SettingsScreen, { PreferredQuality } from '../../screens/Settings/Setting
  * Home, Movies, Series, Favorites page or any other destination; Live TV is
  * the start page and the page opened after connecting.
  *
- * Shares the connection, session, catalog, player, theme, TV focus and
- * diagnostics code with the Full app, but:
- * - its edition has no VOD loader: Xtream requests live categories + live
- *   streams only, and plain M3U playlists keep live entries only (VOD lines
- *   are dropped while streaming, never stored or cached);
- * - it never imports Home, Movies, Series, detail pages, TMDB, ads, Continue
- *   Watching or the Xtream VOD module, so none of it is in the Lite bundle
- *   (built from index.lite.js; checked at build time in android/app/build.gradle).
+ * Its only content source is an M3U file on the device ("رفع ملف M3U",
+ * LiteImportScreen + useLitePlaylist): no account/Xtream sign-in, no server
+ * address, no playlist link. Movies, series and other VOD lines in the file
+ * are dropped while it is parsed.
+ *
+ * Shares the catalog, player, theme, TV focus and M3U parser (m3uCore.ts)
+ * with the Full app, but never imports App.tsx, the Full connection screen,
+ * the Xtream/URL loader (m3u.ts), Home, Movies, Series, detail pages, TMDB,
+ * ads or Continue Watching, so none of it is in the Lite bundle (built from
+ * index.lite.js; checked at build time in android/app/build.gradle).
  *
  * Channel favorites stay channel-level state only (long-press OK toggles the
  * heart on a channel); there is no Favorites page or Favorites category.
@@ -43,9 +46,6 @@ import SettingsScreen, { PreferredQuality } from '../../screens/Settings/Setting
 
 /** Found in the embedded bundle by the Gradle check; identifies this root. */
 export const EDITION_MARKER = 'shashtna-edition:lite';
-
-/** Lite edition: live only, no VOD loader or media indexer. */
-export const LITE_EDITION: Edition = { id: 'lite', liveOnly: true };
 
 export type LitePage = 'live' | 'settings';
 type Page = LitePage;
@@ -75,7 +75,7 @@ export function getLiteNavItems(language: AppLanguage): NavItem[] {
 function LiteContent() {
   const preferences = usePreferencesState();
   const { language, setLanguage, themeMode, setThemeMode } = preferences;
-  const library = useLibrarySession(LITE_EDITION);
+  const library = useLitePlaylist();
   const { catalog } = library;
 
   const [page, setPage] = useState<Page>(START_PAGE);
@@ -95,18 +95,19 @@ function LiteContent() {
     return () => clearTimeout(timer);
   }, [importNotice, ready]);
 
-  const { connect } = library;
-  const onConnected = useCallback(
-    (channels: M3UChannel[], source: string) => {
+  const { importFile } = library;
+  const onImport = useCallback(
+    async (picked: PickedPlaylist, progress: ImportProgress) => {
+      await importFile(picked, progress);
       // A fresh import always lands on Live TV, at the top of all channels.
       setPage(START_PAGE);
       setLiveGroup(null);
       setLastChannelId(null);
+      setSelectedChannel(null);
       screenMemory.clear();
-      setImportNotice(isLocalPlaylistSource(source));
-      return connect(channels, source);
+      setImportNotice(true);
     },
-    [connect],
+    [importFile],
   );
   const navItems = useMemo(() => getLiteNavItems(language), [language]);
   const transition = usePageTransition(page);
@@ -121,13 +122,6 @@ function LiteContent() {
     setSelectedChannel(channel);
   }, []);
 
-  const changeSource = useCallback(() => {
-    setSelectedChannel(null);
-    setPage(START_PAGE);
-    screenMemory.clear();
-    library.disconnect();
-  }, [library]);
-
   if (library.status === 'restoring' || library.status === 'indexing') {
     return (
       <AppPreferencesProvider value={preferences}>
@@ -136,17 +130,12 @@ function LiteContent() {
     );
   }
 
-  if (library.status === 'disconnected') {
+  if (library.status === 'import') {
     return (
       <AppPreferencesProvider value={preferences}>
         <View style={styles.container}>
           <StatusBar barStyle="light-content" backgroundColor="#050C18" />
-          <ConnectionScreen
-            onConnected={onConnected}
-            edition={LITE_EDITION}
-            restoreError={library.failure?.error}
-            initialMethod={library.failure && isLocalPlaylistSource(library.failure.source) ? 'file' : undefined}
-          />
+          <LiteImportScreen onImport={onImport} restoreError={library.failure || undefined} previousName={library.playlist?.name} />
         </View>
       </AppPreferencesProvider>
     );
@@ -187,8 +176,15 @@ function LiteContent() {
         setLanguage={setLanguage}
         themeMode={themeMode}
         setThemeMode={setThemeMode}
-        onChangeSource={changeSource}
-        onRefreshLibrary={library.refresh}
+        sourceSection={
+          <LiteSourceSection
+            ar={language === 'ar'}
+            fileName={library.playlist?.name || ''}
+            channelCount={catalog.live.length}
+            onReplace={onImport}
+            onReload={library.reload}
+          />
+        }
         liveOnly
         onBack={() => navigate(START_PAGE)}
       />
@@ -214,7 +210,6 @@ function LiteContent() {
             items={navItems}
             activeId={page}
             onNavigate={navigate}
-            onChangeSource={changeSource}
             ar={language === 'ar'}
             brandName={BRAND_LITE.nameInside}
           />

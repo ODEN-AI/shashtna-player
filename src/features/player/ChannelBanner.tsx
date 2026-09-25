@@ -2,7 +2,7 @@ import React, { memo, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, Image, StyleSheet, View } from 'react-native';
 import { Text } from '../../components/common/Typography';
 
-import { M3UChannel } from '../../lib/m3u';
+import type { M3UChannel } from '../../lib/m3uCore';
 import { SHASHTNA_FONT, SHASHTNA_THEME } from '../../design/theme';
 import { usePalette } from '../../design/palette';
 

@@ -21,7 +21,7 @@ import Video, {
   VideoRef,
 } from 'react-native-video';
 
-import { M3UChannel } from '../../lib/m3u';
+import type { M3UChannel } from '../../lib/m3uCore';
 
 import { SHASHTNA_THEME } from '../../design/theme';
 import { useAppPreferences } from '../../design/AppPreferencesContext';

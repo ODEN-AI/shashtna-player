@@ -41,6 +41,7 @@ function reachable(entry: string): Set<string> {
 }
 
 const read = (file: string) => fs.readFileSync(path.join(ROOT, file), 'utf8');
+const stripComments = (code: string) => code.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 
 /** Full-only modules: none may be reachable from index.lite.js. */
 const FULL_ONLY = [
@@ -61,8 +62,15 @@ const FULL_ONLY = [
   'src/features/ads/HeroCarousel.tsx',
   'src/features/ads/advertisementRepository.ts',
   'src/features/ads/localAdvertisements.ts',
-  // Lite imports a local M3U file only; the M3U link method is Full's.
+  // Lite's only source is a local M3U file: no sign-in screen, no Xtream
+  // account/API, no playlist link, no Xtream library cache.
   'src/screens/Connection/playlistLink.ts',
+  'src/screens/Connection/ConnectionScreen.tsx',
+  'src/screens/Connection/connectionErrors.ts',
+  'src/lib/m3u.ts',
+  'src/lib/serverUrl.ts',
+  'src/app/useLibrarySession.ts',
+  'src/features/catalog/catalogCache.ts',
 ];
 
 describe('Lite entry and import graph', () => {
@@ -83,16 +91,20 @@ describe('Lite entry and import graph', () => {
       'src/screens/Live/LiveScreen.tsx',
       'src/screens/Player/PlayerScreen.tsx',
       'src/screens/Settings/SettingsScreen.tsx',
-      'src/screens/Connection/ConnectionScreen.tsx',
+      'src/variants/lite/LiteImportScreen.tsx',
+      'src/variants/lite/LiteSourceSection.tsx',
+      'src/variants/lite/useLitePlaylist.ts',
       'src/features/catalog/catalog.ts',
       'src/features/favorites/favoritesStore.ts',
-      'src/lib/m3u.ts',
+      'src/lib/m3uCore.ts',
+      'src/lib/playlistPicker.ts',
+      'src/lib/connectionSession.ts',
     ]) {
       expect(lite.has(shared)).toBe(true);
     }
   });
 
-  it('Lite cannot reach App, Home, Movies, Series, Favorites page, details, TMDB, ads or VOD modules', () => {
+  it('Lite cannot reach App, sign-in/Xtream/link code, Home, Movies, Series, Favorites page, details, TMDB, ads or VOD modules', () => {
     expect(FULL_ONLY.filter(m => lite.has(m))).toEqual([]);
     expect([...lite].filter(m => /(^|\/)(Home|Movies|Series|details|ads|continueWatching)(\/|$)/.test(m))).toEqual([]);
     expect([...lite].filter(m => m.startsWith('src/assets/ads/'))).toEqual([]);
@@ -125,9 +137,15 @@ describe('Lite navigation and startup', () => {
     expect(lite.START_PAGE).toBe('live');
   });
 
-  it('the Lite edition is live-only and carries no VOD loader or media indexer', () => {
-    expect(lite.LITE_EDITION).toEqual({ id: 'lite', liveOnly: true });
+  it('Lite is identified by its marker and loads content only through the local M3U session', () => {
     expect(lite.EDITION_MARKER).toBe('shashtna-edition:lite');
+    const source = read('src/variants/lite/LiteApp.tsx');
+    expect(source).toMatch(/useLitePlaylist\(\)/);
+    expect(source).toMatch(/<LiteImportScreen/);
+    expect(source).not.toMatch(/ConnectionScreen|useLibrarySession|Edition/);
+    const session = stripComments(read('src/variants/lite/useLitePlaylist.ts'));
+    expect(session).toMatch(/loadLocalPlaylist\(uri, [^)]*\{ liveOnly: true \}\)/);
+    expect(session).not.toMatch(/xtream|downloadAndParseM3U|fetch\(/i);
   });
 });
 

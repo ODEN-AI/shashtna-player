@@ -14,7 +14,7 @@ import { useAppPreferences } from '../../design/AppPreferencesContext';
 import { useDeviceClass } from '../../design/device';
 import { focusStyle, Palette, usePalette } from '../../design/palette';
 import { SHASHTNA_FONT, SHASHTNA_THEME } from '../../design/theme';
-import { M3UChannel } from '../../lib/m3u';
+import type { M3UChannel } from '../../lib/m3uCore';
 import { ALL_GROUP, Catalog, channelKey } from '../../features/catalog/catalog';
 import { createSearcher } from '../../features/catalog/search';
 import { toggleFavorite, useFavoriteKeys, useIsFavorite } from '../../features/favorites/favoritesStore';

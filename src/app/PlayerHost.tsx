@@ -2,7 +2,7 @@ import React from 'react';
 
 import { channelKey } from '../features/catalog/catalog';
 import { toggleFavorite, useIsFavorite } from '../features/favorites/favoritesStore';
-import { M3UChannel } from '../lib/m3u';
+import type { M3UChannel } from '../lib/m3uCore';
 import PlayerScreen, { PlayerDetailScreens } from '../screens/Player/PlayerScreen';
 
 export type PlayerLaunchOptions = {

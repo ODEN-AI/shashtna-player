@@ -23,7 +23,13 @@ type Props = {
   setLanguage: (value: AppLanguage) => void;
   themeMode: ThemeMode;
   setThemeMode: (value: ThemeMode) => void;
-  onChangeSource: () => void;
+  /** Default "Source" section: sign in with another subscription. */
+  onChangeSource?: () => void;
+  /**
+   * Replaces the default "Source" section (Shashtna Player Lite shows its
+   * imported M3U file there instead).
+   */
+  sourceSection?: React.ReactNode;
   /** Re-download the library (it is cached between launches). */
   onRefreshLibrary?: () => void;
   /** Shashtna Player Lite: Live TV only, so texts don't mention movies/series. */
@@ -43,6 +49,7 @@ export default function SettingsScreen({
   themeMode,
   setThemeMode,
   onChangeSource,
+  sourceSection,
   onRefreshLibrary,
   liveOnly = false,
   onBack,
@@ -143,6 +150,7 @@ export default function SettingsScreen({
           <SettingToggle title={ar?'الترجمة عند توفرها':'Subtitles when available'} sub={ar?'فعّل الترجمة تلقائيًا إذا كانت متوفرة.':'Enable subtitles automatically when available.'} value={subtitles} onPress={()=>setSubtitles(!subtitles)} palette={palette}/>
         </View>
 
+        {sourceSection ?? (
         <View style={[styles.section, { borderColor: palette.border, backgroundColor: palette.surfaceSoft }]}>
           <Text style={[styles.sectionTitle, { color: palette.text }]}>{ar ? 'المصدر' : 'Source'}</Text>
           <Pressable focusable onPress={onChangeSource} style={({focused})=>[styles.actionRow,{borderColor:palette.border,backgroundColor:palette.surface},focused&&styles.focus]}>
@@ -158,6 +166,7 @@ export default function SettingsScreen({
             </Pressable>
           ) : null}
         </View>
+        )}
       </ScrollView>
     </View>
   );

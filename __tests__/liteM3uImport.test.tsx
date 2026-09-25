@@ -7,16 +7,17 @@ import ReactTestRenderer from 'react-test-renderer';
 import { loadConnectionSource } from '../src/lib/connectionSession';
 import {
   createM3UTextParser,
-  downloadAndParseM3U,
+  loadLocalPlaylist,
   NoLiveChannelsError,
   PlaylistEmptyError,
   PlaylistFormatError,
-} from '../src/lib/m3u';
+} from '../src/lib/m3uCore';
 import { PlaylistReadError } from '../src/lib/playlistPicker';
-import { describeConnectionError } from '../src/screens/Connection/connectionErrors';
+import { describeImportError } from '../src/variants/lite/importErrors';
 
 /**
- * Shashtna Player Lite: importing a local M3U file.
+ * Shashtna Player Lite: its only source, a local M3U file. Also checks that
+ * Shashtna Player (Full) keeps its account, link and file sign-in.
  *
  * The native picker/reader (PlaylistPickerModule.kt) is replaced by an
  * in-memory stand-in with the same contract: pickPlaylist -> { uri, name,
@@ -100,7 +101,7 @@ describe('reading a picked M3U file', () => {
   it('reads content:// through the native ContentResolver reader, not react-native-blob-util', async () => {
     disk.set(URI, PLAYLIST);
     const progress: Array<[number, number]> = [];
-    const channels = await downloadAndParseM3U(URI, (r, t) => progress.push([r, t]), undefined, {
+    const channels = await loadLocalPlaylist(URI, (r, t) => progress.push([r, t]), undefined, {
       liveOnly: true,
       sizeHint: Buffer.byteLength(PLAYLIST),
     });
@@ -114,7 +115,7 @@ describe('reading a picked M3U file', () => {
 
   it('parses the same channels, logos, groups and Arabic names as a one-piece parse', async () => {
     disk.set(URI, PLAYLIST);
-    const chunked = await downloadAndParseM3U(URI, undefined, undefined, { liveOnly: true });
+    const chunked = await loadLocalPlaylist(URI, undefined, undefined, { liveOnly: true });
     const whole = createM3UTextParser({ liveOnly: true });
     whole.push(PLAYLIST);
     expect(chunked).toEqual(whole.end());
@@ -123,7 +124,7 @@ describe('reading a picked M3U file', () => {
 
   it('Lite keeps live channels only: movies, series and VOD files are dropped', async () => {
     disk.set(URI, PLAYLIST);
-    const channels = await downloadAndParseM3U(URI, undefined, undefined, { liveOnly: true });
+    const channels = await loadLocalPlaylist(URI, undefined, undefined, { liveOnly: true });
     expect(channels.every(c => c.contentType === 'live')).toBe(true);
     for (const vod of VOD_NAMES) expect(channels.map(c => c.name)).not.toContain(vod);
   });
@@ -139,29 +140,29 @@ describe('reading a picked M3U file', () => {
 
   it('rejects an empty file', async () => {
     disk.set(URI, '');
-    await expect(downloadAndParseM3U(URI, undefined, undefined, { liveOnly: true })).rejects.toBeInstanceOf(PlaylistEmptyError);
+    await expect(loadLocalPlaylist(URI, undefined, undefined, { liveOnly: true })).rejects.toBeInstanceOf(PlaylistEmptyError);
     disk.set(URI, ' \r\n \n\t');
-    await expect(downloadAndParseM3U(URI, undefined, undefined, { liveOnly: true })).rejects.toBeInstanceOf(PlaylistEmptyError);
+    await expect(loadLocalPlaylist(URI, undefined, undefined, { liveOnly: true })).rejects.toBeInstanceOf(PlaylistEmptyError);
   });
 
   it('rejects a file that is not M3U', async () => {
     disk.set(URI, 'name,url\nقناة,http://x/1.ts\n');
-    await expect(downloadAndParseM3U(URI, undefined, undefined, { liveOnly: true })).rejects.toBeInstanceOf(PlaylistFormatError);
+    await expect(loadLocalPlaylist(URI, undefined, undefined, { liveOnly: true })).rejects.toBeInstanceOf(PlaylistFormatError);
   });
 
   it('rejects a playlist with no live channels (VOD only, or header only)', async () => {
     disk.set(URI, '#EXTM3U\n#EXTINF:-1 group-title="أفلام",فيلم\nhttp://srv/movie/u/p/9.mp4\n');
-    await expect(downloadAndParseM3U(URI, undefined, undefined, { liveOnly: true })).rejects.toBeInstanceOf(NoLiveChannelsError);
+    await expect(loadLocalPlaylist(URI, undefined, undefined, { liveOnly: true })).rejects.toBeInstanceOf(NoLiveChannelsError);
     disk.set(URI, '#EXTM3U\n');
-    await expect(downloadAndParseM3U(URI, undefined, undefined, { liveOnly: true })).rejects.toBeInstanceOf(NoLiveChannelsError);
+    await expect(loadLocalPlaylist(URI, undefined, undefined, { liveOnly: true })).rejects.toBeInstanceOf(NoLiveChannelsError);
   });
 
   it('reports a file that can no longer be opened', async () => {
-    await expect(downloadAndParseM3U(URI, undefined, undefined, { liveOnly: true })).rejects.toBeInstanceOf(PlaylistReadError);
+    await expect(loadLocalPlaylist(URI, undefined, undefined, { liveOnly: true })).rejects.toBeInstanceOf(PlaylistReadError);
   });
 
   it('gives each failure a clear Arabic message', () => {
-    const msg = (e: unknown) => describeConnectionError(e, true).message;
+    const msg = (e: unknown) => describeImportError(e, true).message;
     expect(msg(new PlaylistReadError('FileNotFoundException', 'E_NOT_FOUND'))).toContain('تعذر قراءة ملف M3U');
     expect(msg(new PlaylistEmptyError())).toContain('الملف فارغ');
     expect(msg(new PlaylistFormatError())).toContain('صيغة الملف غير مدعومة');
@@ -170,10 +171,11 @@ describe('reading a picked M3U file', () => {
 });
 
 // ---------------------------------------------------------------------------
-// The whole Lite flow, rendered: pick -> read -> parse -> store -> Live TV.
+// The whole Lite flow, rendered: رفع ملف M3U -> read -> parse -> save -> Live TV.
 
 const LiteApp = require('../src/variants/lite/LiteApp').default;
 const { importNoticeText } = require('../src/variants/lite/LiteApp');
+const { saveConnectionSource } = require('../src/lib/connectionSession');
 
 type Tree = ReactTestRenderer.ReactTestRenderer;
 
@@ -201,10 +203,10 @@ async function waitFor(tree: Tree, check: () => boolean, what: string) {
   }
   throw new Error(`Timed out waiting for ${what}. Screen: ${allText(tree).slice(0, 600)}`);
 }
-async function mount(): Promise<Tree> {
+async function mount(element: React.ReactElement = <LiteApp />): Promise<Tree> {
   let tree: Tree | undefined;
   await ReactTestRenderer.act(async () => {
-    tree = ReactTestRenderer.create(<LiteApp />);
+    tree = ReactTestRenderer.create(element);
   });
   return tree!;
 }
@@ -212,30 +214,33 @@ async function unmount(tree: Tree) {
   await ReactTestRenderer.act(async () => tree.unmount());
 }
 const channelShown = (tree: Tree, name: string) => labelled(tree, name).length > 0;
-const pickReturns = (uri: string, text: string) => {
+const pickReturns = (uri: string, text: string, name = 'iraq.m3u') => {
   disk.set(uri, text);
-  native.pickPlaylist.mockResolvedValueOnce({ uri, name: 'iraq.m3u', size: Buffer.byteLength(text) });
+  native.pickPlaylist.mockResolvedValueOnce({ uri, name, size: Buffer.byteLength(text) });
 };
+const UPLOAD = 'رفع ملف M3U';
+const onImportScreen = (tree: Tree) => labelled(tree, UPLOAD).length > 0;
+const ACCOUNT_WORDS = ['بيانات الحساب', 'اسم المستخدم', 'كلمة المرور', 'رابط السيرفر', 'رابط M3U', 'رابط قائمة التشغيل', 'Username', 'Password', 'Server URL'];
 
-describe('Shashtna Player Lite: M3U file import flow', () => {
-  it('has no M3U URL field: only the account and the M3U file options', async () => {
+describe('Shashtna Player Lite: local M3U file only', () => {
+  it('shows only "رفع ملف M3U": no account form, no server/username/password, no M3U link, no text input', async () => {
     const tree = await mount();
-    await waitFor(tree, () => labelled(tree, 'ملف M3U').length > 0, 'the connection screen');
-    expect(labelled(tree, 'رابط M3U')).toEqual([]);
-    expect(labelled(tree, 'بيانات الحساب').length).toBeGreaterThan(0);
-    await press(tree, 'ملف M3U');
-    expect(allText(tree)).not.toMatch(/رابط قائمة التشغيل|Playlist link/);
-    expect(tree.root.findAll(n => n.props.placeholder === 'http://provider.tv/playlist.m3u')).toEqual([]);
+    await waitFor(tree, () => onImportScreen(tree), 'the import screen');
+    const text = allText(tree);
+    expect(text).toContain('استيراد ملف M3U');
+    expect(text).toContain('اختر ملف M3U من جهازك لبدء استخدام القنوات المباشرة.');
+    for (const word of ACCOUNT_WORDS) expect(text).not.toContain(word);
+    expect(tree.root.findAll(n => typeof n.props.onChangeText === 'function')).toEqual([]);
+    expect(tree.root.findAll(n => n.props.accessibilityRole === 'tab')).toEqual([]);
     await unmount(tree);
   });
 
-  it('imports the picked file right away and shows its live channels, with a success notice and count', async () => {
+  it('imports the picked file and opens Live TV with its live channels, a success notice and the count', async () => {
     const tree = await mount();
-    await waitFor(tree, () => labelled(tree, 'ملف M3U').length > 0, 'the connection screen');
-    await press(tree, 'ملف M3U');
+    await waitFor(tree, () => onImportScreen(tree), 'the import screen');
     pickReturns(URI, PLAYLIST);
-    // One action: choose the file. No URL, no extra sign-in step, no restart.
-    await press(tree, 'اختيار ملف قائمة التشغيل');
+    // One action: رفع ملف M3U. No URL, no account, no extra step, no restart.
+    await press(tree, UPLOAD);
     await waitFor(tree, () => LIVE_NAMES.every(name => channelShown(tree, name)), 'the imported channels');
 
     const text = allText(tree);
@@ -244,20 +249,60 @@ describe('Shashtna Player Lite: M3U file import flow', () => {
     expect(text).toContain(notice.title);
     expect(text).toContain(`عدد القنوات: ${(3).toLocaleString('ar-IQ')}`);
     for (const vod of VOD_NAMES) expect(channelShown(tree, vod)).toBe(false);
-    // Still Live TV only.
     expect(text).toContain('البث المباشر');
     for (const banned of ['الأفلام', 'المسلسلات', 'الرئيسية']) expect(labelled(tree, banned)).toEqual([]);
-    // The source is saved for the next launch.
+    // No network at all: nothing but the file was read.
+    expect(globalThis.fetch).not.toHaveBeenCalled();
     expect(await loadConnectionSource()).toBe(URI);
     await unmount(tree);
   });
 
-  it('restores the imported file on the next launch, and explains when the file is gone', async () => {
-    let tree = await mount();
-    await waitFor(tree, () => labelled(tree, 'ملف M3U').length > 0, 'the connection screen');
-    await press(tree, 'ملف M3U');
+  it('Settings shows the current file and channel count, and replaces the file', async () => {
+    const tree = await mount();
+    await waitFor(tree, () => onImportScreen(tree), 'the import screen');
     pickReturns(URI, PLAYLIST);
-    await press(tree, 'اختيار ملف قائمة التشغيل');
+    await press(tree, UPLOAD);
+    await waitFor(tree, () => channelShown(tree, 'العراقية'), 'the imported channels');
+    await press(tree, 'الإعدادات');
+    await waitFor(tree, () => allText(tree).includes('مصدر المحتوى'), 'the Settings source section');
+    let text = allText(tree);
+    expect(text).toContain('ملف M3U الحالي');
+    expect(text).toContain('iraq.m3u');
+    expect(text).toContain(`القنوات: ${(3).toLocaleString('ar-IQ')}`);
+    for (const word of [...ACCOUNT_WORDS, 'تغيير المصدر', 'تسجيل الدخول باشتراك']) expect(text).not.toContain(word);
+
+    const OTHER = 'content://com.android.providers.downloads.documents/document/msf%3A42';
+    pickReturns(OTHER, '#EXTM3U\n#EXTINF:-1 group-title="أخبار",الشرقية نيوز\nhttp://srv/live/u/p/77.ts\n', 'news.m3u');
+    await press(tree, 'استبدال ملف M3U');
+    await waitFor(tree, () => channelShown(tree, 'الشرقية نيوز'), 'the replacement channels');
+    text = allText(tree);
+    expect(text).toContain('تم تحميل ملف M3U بنجاح');
+    expect(text).toContain(`عدد القنوات: ${(1).toLocaleString('ar-IQ')}`);
+    expect(channelShown(tree, 'العراقية')).toBe(false);
+    expect(await loadConnectionSource()).toBe(OTHER);
+    await unmount(tree);
+  });
+
+  it('a bad replacement file keeps the current playlist and explains why', async () => {
+    const tree = await mount();
+    await waitFor(tree, () => onImportScreen(tree), 'the import screen');
+    pickReturns(URI, PLAYLIST);
+    await press(tree, UPLOAD);
+    await waitFor(tree, () => channelShown(tree, 'العراقية'), 'the imported channels');
+    await press(tree, 'الإعدادات');
+    pickReturns('content://docs/empty.m3u', '');
+    await press(tree, 'استبدال ملف M3U');
+    await waitFor(tree, () => allText(tree).includes('الملف فارغ'), 'the empty-file message');
+    expect(allText(tree)).toContain('iraq.m3u');
+    expect(await loadConnectionSource()).toBe(URI);
+    await unmount(tree);
+  });
+
+  it('restores the imported file on the next launch, and returns to "استيراد ملف M3U" when it is gone', async () => {
+    let tree = await mount();
+    await waitFor(tree, () => onImportScreen(tree), 'the import screen');
+    pickReturns(URI, PLAYLIST);
+    await press(tree, UPLOAD);
     await waitFor(tree, () => channelShown(tree, 'العراقية'), 'the imported channels');
     await unmount(tree);
 
@@ -269,12 +314,25 @@ describe('Shashtna Player Lite: M3U file import flow', () => {
     expect(allText(tree)).not.toContain('تم تحميل ملف M3U بنجاح'); // only after an import
     await unmount(tree);
 
-    // The file was deleted / access revoked: back to the file tab with a clear message.
+    // The file was deleted / access revoked.
     disk.delete(URI);
     tree = await mount();
     await waitFor(tree, () => allText(tree).includes('تعذر قراءة ملف M3U'), 'the read error');
-    const fileTab = labelled(tree, 'ملف M3U')[0];
-    expect(fileTab.props.accessibilityState).toMatchObject({ selected: true });
+    const text = allText(tree);
+    expect(text).toContain('استيراد ملف M3U');
+    expect(text).toContain('iraq.m3u');
+    expect(onImportScreen(tree)).toBe(true);
+    for (const word of ACCOUNT_WORDS) expect(text).not.toContain(word);
+    await unmount(tree);
+  });
+
+  it('a source saved by an older build (Xtream link) is not loaded: no network, back to the import screen', async () => {
+    await saveConnectionSource('http://srv:8080/get.php?username=u&password=p&type=m3u_plus');
+    const tree = await mount();
+    await waitFor(tree, () => onImportScreen(tree), 'the import screen');
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(allText(tree)).not.toContain('تعذر');
+    expect(await loadConnectionSource()).toBeNull();
     await unmount(tree);
   });
 
@@ -284,35 +342,92 @@ describe('Shashtna Player Lite: M3U file import flow', () => {
     ['a playlist without live channels', '#EXTM3U\n#EXTINF:-1 group-title="أفلام",فيلم\nhttp://srv/movie/u/p/9.mp4\n', 'لم يتم العثور على قنوات مباشرة داخل الملف'],
   ])('shows an Arabic error and stays on the import screen for %s', async (_case, content, message) => {
     const tree = await mount();
-    await waitFor(tree, () => labelled(tree, 'ملف M3U').length > 0, 'the connection screen');
-    await press(tree, 'ملف M3U');
+    await waitFor(tree, () => onImportScreen(tree), 'the import screen');
     pickReturns(URI, content);
-    await press(tree, 'اختيار ملف قائمة التشغيل');
+    await press(tree, UPLOAD);
     await waitFor(tree, () => allText(tree).includes(message), `the message "${message}"`);
     expect(allText(tree)).toContain('تعذر استيراد ملف M3U');
+    expect(onImportScreen(tree)).toBe(true);
     expect(await loadConnectionSource()).toBeNull();
     await unmount(tree);
   });
 
   it('does nothing (and shows no error) when the picker is cancelled', async () => {
     const tree = await mount();
-    await waitFor(tree, () => labelled(tree, 'ملف M3U').length > 0, 'the connection screen');
-    await press(tree, 'ملف M3U');
+    await waitFor(tree, () => onImportScreen(tree), 'the import screen');
     native.pickPlaylist.mockResolvedValueOnce(null);
-    await press(tree, 'اختيار ملف قائمة التشغيل');
+    await press(tree, UPLOAD);
     expect(native.openPlaylist).not.toHaveBeenCalled();
     expect(allText(tree)).not.toContain('تعذر');
     await unmount(tree);
   });
 });
 
+// ---------------------------------------------------------------------------
+// Shashtna Player (Full): account/Xtream, M3U link and M3U file all remain.
+
 describe('Shashtna Player (Full) connection screen is unchanged', () => {
-  it('still offers account, M3U link and M3U file, and the link still connects', async () => {
-    const ConnectionScreen = require('../src/screens/Connection/ConnectionScreen').default;
-    const { AppPreferencesProvider } = require('../src/design/AppPreferencesContext');
-    const { PLAYLIST_LINK } = require('../src/screens/Connection/playlistLink');
-    const noop = () => {};
-    const prefs = { language: 'ar', setLanguage: noop, themeMode: 'dark', setThemeMode: noop, accent: 'shashtna', customAccent: null, setAccent: noop };
+  const ConnectionScreen = require('../src/screens/Connection/ConnectionScreen').default;
+  const { AppPreferencesProvider } = require('../src/design/AppPreferencesContext');
+  const { PLAYLIST_LINK } = require('../src/screens/Connection/playlistLink');
+  const { loadXtreamVod } = require('../src/lib/xtreamVod');
+  const noop = () => {};
+  const prefs = { language: 'ar', setLanguage: noop, themeMode: 'dark', setThemeMode: noop, accent: 'shashtna', customAccent: null, setAccent: noop };
+  const FULL = { id: 'full', liveOnly: false, loadVod: loadXtreamVod, playlistLink: PLAYLIST_LINK };
+  const full = (onConnected: jest.Mock) => (
+    <AppPreferencesProvider value={prefs}>
+      <ConnectionScreen onConnected={onConnected} edition={FULL} />
+    </AppPreferencesProvider>
+  );
+  const signIn = async (tree: Tree) => {
+    const button = tree.root.findAll(
+      n => typeof n.props.onPress === 'function' && n.findAll(c => c.props.children === 'تسجيل الدخول').length > 0,
+    )[0];
+    await ReactTestRenderer.act(async () => {
+      await button.props.onPress();
+    });
+  };
+  const type = async (tree: Tree, placeholder: string, value: string) => {
+    const input = tree.root.findAll(n => n.props.placeholder === placeholder && typeof n.props.onChangeText === 'function')[0];
+    await ReactTestRenderer.act(async () => input.props.onChangeText(value));
+  };
+
+  it('offers account, M3U link and M3U file', async () => {
+    const tree = await mount(full(jest.fn()));
+    for (const tab of ['بيانات الحساب', 'رابط M3U', 'ملف M3U']) expect(labelled(tree, tab).length).toBeGreaterThan(0);
+    await unmount(tree);
+  });
+
+  it('still signs in with an Xtream account (live + movies + series)', async () => {
+    const actions: string[] = [];
+    const BODIES: Record<string, unknown[]> = {
+      get_live_categories: [{ category_id: '1', category_name: 'عام' }],
+      get_live_streams: [{ stream_id: 7, name: 'قناة', category_id: '1' }],
+      get_vod_categories: [{ category_id: '2', category_name: 'أفلام' }],
+      get_vod_streams: [{ stream_id: 8, name: 'فيلم', category_id: '2', container_extension: 'mp4' }],
+      get_series_categories: [{ category_id: '3', category_name: 'مسلسلات' }],
+      get_series: [{ series_id: 9, name: 'مسلسل', category_id: '3' }],
+    };
+    globalThis.fetch = jest.fn(async (url: string) => {
+      const action = /action=([a-z_]+)/.exec(String(url))?.[1] || '';
+      if (action) actions.push(action);
+      return { ok: true, json: async () => BODIES[action] || [] } as any;
+    }) as any;
+    const onConnected = jest.fn();
+    const tree = await mount(full(onConnected));
+    await type(tree, 'http://server:port', 'srv.example:8080');
+    await type(tree, 'أدخل اسم المستخدم', 'user');
+    await type(tree, 'أدخل كلمة المرور', 'pass');
+    await signIn(tree);
+    await waitFor(tree, () => onConnected.mock.calls.length > 0, 'the Xtream sign-in');
+    const [channels, source] = onConnected.mock.calls[0];
+    expect(source).toContain('http://srv.example:8080/get.php?username=user');
+    expect(new Set(channels.map((c: any) => c.contentType))).toEqual(new Set(['live', 'movie', 'series']));
+    expect(actions).toEqual(expect.arrayContaining(['get_live_streams', 'get_vod_streams', 'get_series']));
+    await unmount(tree);
+  });
+
+  it('still signs in with an M3U link', async () => {
     const onConnected = jest.fn();
     const playlist = '#EXTM3U\n#EXTINF:-1 group-title="أفلام",فيلم\nhttp://srv/movie/u/p/9.mp4\n#EXTINF:-1,قناة\nhttp://srv/live/u/p/1.ts\n';
     (ReactNativeBlobUtil as any).config = jest.fn(() => ({
@@ -322,30 +437,30 @@ describe('Shashtna Player (Full) connection screen is unchanged', () => {
       }),
     }));
     (ReactNativeBlobUtil.fs as any).stat = jest.fn(async () => ({ size: playlist.length }));
-    let tree: Tree | undefined;
-    await ReactTestRenderer.act(async () => {
-      tree = ReactTestRenderer.create(
-        <AppPreferencesProvider value={prefs}>
-          <ConnectionScreen onConnected={onConnected} edition={{ id: 'full', liveOnly: false, playlistLink: PLAYLIST_LINK }} />
-        </AppPreferencesProvider>,
-      );
-    });
-    for (const tab of ['بيانات الحساب', 'رابط M3U', 'ملف M3U']) expect(labelled(tree!, tab).length).toBeGreaterThan(0);
-    await press(tree!, 'رابط M3U');
-    const input = tree!.root.findAll(n => n.props.placeholder === 'http://provider.tv/playlist.m3u' && typeof n.props.onChangeText === 'function')[0];
-    await ReactTestRenderer.act(async () => input.props.onChangeText('provider.tv/list.m3u'));
-    await press(tree!, 'رابط M3U'); // re-select: keeps the typed link
-    const button = tree!.root.findAll(
-      n => typeof n.props.onPress === 'function' && n.findAll(c => c.props.children === 'تسجيل الدخول').length > 0,
-    )[0];
-    await ReactTestRenderer.act(async () => {
-      await button.props.onPress();
-    });
-    await waitFor(tree!, () => onConnected.mock.calls.length > 0, 'the Full link sign-in');
+    const tree = await mount(full(onConnected));
+    await press(tree, 'رابط M3U');
+    await type(tree, 'http://provider.tv/playlist.m3u', 'provider.tv/list.m3u');
+    await signIn(tree);
+    await waitFor(tree, () => onConnected.mock.calls.length > 0, 'the Full link sign-in');
     const [channels, source] = onConnected.mock.calls[0];
     expect(source).toBe('http://provider.tv/list.m3u');
-    // Full keeps movies too.
     expect(channels.map((c: any) => c.contentType).sort()).toEqual(['live', 'movie']);
-    await unmount(tree!);
+    await unmount(tree);
+  });
+
+  it('still loads a local M3U file (keeping movies and series)', async () => {
+    const onConnected = jest.fn();
+    const tree = await mount(full(onConnected));
+    await press(tree, 'ملف M3U');
+    pickReturns(URI, PLAYLIST);
+    await press(tree, 'اختيار ملف قائمة التشغيل');
+    // Full keeps its two-step flow: pick, then sign in.
+    expect(onConnected).not.toHaveBeenCalled();
+    await signIn(tree);
+    await waitFor(tree, () => onConnected.mock.calls.length > 0, 'the Full file sign-in');
+    const [channels, source] = onConnected.mock.calls[0];
+    expect(source).toBe(URI);
+    expect(new Set(channels.map((c: any) => c.contentType))).toEqual(new Set(['live', 'movie', 'series']));
+    await unmount(tree);
   });
 });

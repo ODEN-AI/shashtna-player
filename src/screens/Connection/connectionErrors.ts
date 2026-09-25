@@ -1,15 +1,9 @@
+import { redactSecrets } from '../../lib/redact';
+
+export { redactSecrets };
+
 /** A problem with what the user typed; its message is already user-facing. */
 export class ValidationError extends Error {}
-
-/**
- * Removes credentials from diagnostic text: Xtream/M3U links carry the
- * username and password, so any URL is reduced to its scheme + host.
- */
-export function redactSecrets(text: string): string {
-  return text
-    .replace(/(username|password|user|pass|token)=([^&\s"']+)/gi, '$1=***')
-    .replace(/(https?:\/\/[^/\s"']+)[^\s"']*/gi, '$1/…');
-}
 
 export function describeConnectionError(error: unknown, ar: boolean): { message: string; technical: string } {
   if (error instanceof ValidationError) {

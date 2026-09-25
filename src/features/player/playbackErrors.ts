@@ -1,4 +1,4 @@
-import { redactSecrets } from '../../screens/Connection/connectionErrors';
+import { redactSecrets } from '../../lib/redact';
 
 /**
  * Turns react-native-video / ExoPlayer errors into a short human message
