@@ -17,3 +17,9 @@ export const BRAND_ASSETS = {
   logo: require('../assets/shashtna-player-logo.png'),
   background: require('../assets/shashtna-app-background.webp'),
 };
+
+/** Shashtna Player Lite (Live TV only) naming. */
+export const BRAND_LITE = {
+  nameInside: 'شاشتنا Lite',
+  nameLatin: 'Shashtna Player Lite',
+} as const;

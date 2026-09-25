@@ -4,6 +4,9 @@ apply plugin: "com.facebook.react"
 
 react {
     autolinkLibrariesWithApp()
+    // With product flavors the debug variants are fullDebug / liteDebug; they
+    // load JS from Metro, every other variant bundles it into the APK.
+    debuggableVariants = ["fullDebug", "liteDebug"]
 }
 
 def enableProguardInReleaseBuilds = false
@@ -67,6 +70,24 @@ android {
         }
     }
 
+    // Editions. One codebase, two apps that can be installed side by side:
+    //   full: Live TV + Movies + Series. applicationId com.shashtnaplayer (unchanged).
+    //   lite: Live TV only. applicationId com.shashtnaplayer.lite, launcher name from
+    //         src/lite/res/values/strings.xml, JS entry index.lite.js (no VOD code).
+    flavorDimensions "edition"
+    productFlavors {
+        full {
+            dimension "edition"
+            buildConfigField "String", "JS_MAIN_MODULE", '"index"'
+        }
+        lite {
+            dimension "edition"
+            applicationIdSuffix ".lite"
+            versionNameSuffix "-lite"
+            buildConfigField "String", "JS_MAIN_MODULE", '"index.lite"'
+        }
+    }
+
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
@@ -78,6 +99,13 @@ android {
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
     }
+}
+
+// Release (bundled) builds of the Lite edition start from index.lite.js, so the
+// Lite APK's JS bundle contains no Movies/Series screens at all. Debug builds
+// load the same module from Metro (BuildConfig.JS_MAIN_MODULE in MainApplication).
+tasks.matching { it.name.startsWith("createBundleLite") && it.name.endsWith("JsAndAssets") }.configureEach {
+    it.entryFile.set(file("../../index.lite.js"))
 }
 
 // Keep `gradlew clean` working with autolinked New Architecture libraries.

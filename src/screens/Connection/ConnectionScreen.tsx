@@ -21,6 +21,8 @@ import { describeConnectionError, ValidationError } from './connectionErrors';
 
 type Props = {
   onConnected: (channels: M3UChannel[], source: string) => void;
+  /** Shashtna Player Lite: load live channels only. */
+  liveOnly?: boolean;
 };
 
 async function checkNetworkConnection(): Promise<boolean> {
@@ -57,7 +59,7 @@ const TAGLINE = { ar: 'كل ما تحب، على شاشة واحدة.', en: 'Eve
  * buildXtreamM3UUrl and are loaded with downloadAndParseM3U (the same loader
  * App uses to restore a saved source).
  */
-export default function ConnectionScreen({ onConnected }: Props) {
+export default function ConnectionScreen({ onConnected, liveOnly = false }: Props) {
   const { language, setLanguage } = useAppPreferences();
   const ar = language === 'ar';
   const palette = usePalette();
@@ -115,6 +117,7 @@ export default function ConnectionScreen({ onConnected }: Props) {
         source,
         value => setProgress(value),
         parsed => setCount(parsed),
+        { liveOnly },
       );
 
       if (!channels.length) {

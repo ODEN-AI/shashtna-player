@@ -9,14 +9,18 @@ import { ShellBackground } from './AppShell';
 /** Total on-screen time; runs in parallel with restoring the saved connection. */
 const HOLD_MS = 1100;
 
-type Props = { onFinish: () => void };
+type Props = {
+  onFinish: () => void;
+  /** Product name under the logo (the Lite edition shows its own). */
+  name?: string;
+};
 
 /**
  * Launch screen: Shashtna logo + name, subtle developer credit at the bottom.
  * Android 12+ shows the system splash first (same dark colour, see
  * res/values-v31/styles.xml), so this stays short to avoid a double splash.
  */
-export default function SplashScreen({ onFinish }: Props) {
+export default function SplashScreen({ onFinish, name = BRAND.nameInside }: Props) {
   const intro = useRef(new Animated.Value(0)).current;
   const outro = useRef(new Animated.Value(1)).current;
 
@@ -40,7 +44,7 @@ export default function SplashScreen({ onFinish }: Props) {
       <View style={[StyleSheet.absoluteFill, styles.dim]} />
       <Animated.View style={[styles.center, { opacity: intro, transform: [{ scale }] }]}>
         <Image source={BRAND_ASSETS.logo} style={styles.logo} resizeMode="contain" />
-        <Text style={styles.name}>{BRAND.nameInside}</Text>
+        <Text style={styles.name}>{name}</Text>
       </Animated.View>
       <AnimatedText style={[styles.credit, { opacity: intro }]}>{BRAND.developerCredit}</AnimatedText>
     </Animated.View>

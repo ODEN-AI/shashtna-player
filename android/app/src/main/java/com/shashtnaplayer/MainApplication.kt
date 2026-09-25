@@ -13,6 +13,10 @@ class MainApplication : Application(), ReactApplication {
   override val reactHost: ReactHost by lazy {
     getDefaultReactHost(
       context = applicationContext,
+      // "index" (Shashtna Player) or "index.lite" (Shashtna Player Lite), set per
+      // product flavor. Used when loading from Metro; release APKs embed the
+      // bundle built from the same entry file.
+      jsMainModulePath = BuildConfig.JS_MAIN_MODULE,
       packageList =
         PackageList(this).packages.apply {
           // App-local module: Android Keystore-backed storage for credentials.

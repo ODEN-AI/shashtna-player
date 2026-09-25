@@ -8,7 +8,7 @@ import {
 } from 'react-native';
 import { Text, TextInput } from '../../components/common/Typography';
 
-import AppIcon from '../../components/common/AppIcon';
+import AppIcon, { AppIconName } from '../../components/common/AppIcon';
 import { FilterButton, OptionSheet } from '../../components/filters/FilterControls';
 import { useAppPreferences } from '../../design/AppPreferencesContext';
 import { useDeviceClass } from '../../design/device';
@@ -27,6 +27,9 @@ type Props = {
   /** `queue` is the list currently on screen; the player zaps through it. */
   onOpenPlayer: (channel: M3UChannel, queue: readonly M3UChannel[]) => void;
   onBackHome: () => void;
+  /** Label/icon of the header shortcut (Home in Full, Favorites in Lite). */
+  homeLabel?: string;
+  homeIcon?: AppIconName;
   /** Pre-select a category (Home shortcut, or the one in use before opening the player). */
   initialGroup?: string | null;
   /** Remembers the chosen category across player visits. */
@@ -52,7 +55,7 @@ type LiveMemory = { query: string };
  * The visible, filtered list is what the player receives as its zapping queue,
  * so UP/DOWN in the player never jumps to a channel outside it.
  */
-export default function LiveScreen({ catalog, onOpenPlayer, onBackHome, initialGroup, onGroupChange, focusChannelId }: Props) {
+export default function LiveScreen({ catalog, onOpenPlayer, onBackHome, homeLabel, homeIcon = 'home', initialGroup, onGroupChange, focusChannelId }: Props) {
   const channels = catalog.live;
   const { language } = useAppPreferences();
   const palette = usePalette();
@@ -192,7 +195,7 @@ export default function LiveScreen({ catalog, onOpenPlayer, onBackHome, initialG
         {!compact ? (
           <Pressable
             focusable
-            accessibilityLabel={ar ? 'الرئيسية' : 'Home'}
+            accessibilityLabel={homeLabel || (ar ? 'الرئيسية' : 'Home')}
             onPress={onBackHome}
             style={({ focused, pressed }) => [
               styles.iconButton,
@@ -201,7 +204,7 @@ export default function LiveScreen({ catalog, onOpenPlayer, onBackHome, initialG
               pressed && styles.pressed,
             ]}
           >
-            <AppIcon name="home" size={19} color={palette.secondary} />
+            <AppIcon name={homeIcon} size={19} color={palette.secondary} />
           </Pressable>
         ) : null}
       </View>

@@ -24,6 +24,8 @@ type Props = {
   onNavigate: (id: string) => void;
   onChangeSource: () => void;
   ar: boolean;
+  /** Product name next to the logo (the Lite edition shows its own). */
+  brandName?: string;
 };
 
 const L = SHASHTNA_THEME.layout;
@@ -45,7 +47,7 @@ export function useSidebarRailWidth() {
  *     item when the user re-enters from the content.
  * Touch: a toggle button opens it; tapping outside or choosing an item closes it.
  */
-function Sidebar({ items, activeId, onNavigate, onChangeSource, ar }: Props) {
+function Sidebar({ items, activeId, onNavigate, onChangeSource, ar, brandName = BRAND.nameInside }: Props) {
   const palette = usePalette();
   const device = useDeviceClass();
   const isTV = device === 'tv';
@@ -155,7 +157,7 @@ function Sidebar({ items, activeId, onNavigate, onChangeSource, ar }: Props) {
           <Image source={BRAND_ASSETS.logo} style={styles.logo} />
           <Animated.View style={[styles.brandText, { opacity: labelOpacity }]}>
             <Text numberOfLines={1} style={[styles.brandName, { color: palette.text, textAlign: ar ? 'right' : 'left' }]}>
-              {BRAND.nameInside}
+              {brandName}
             </Text>
           </Animated.View>
         </View>

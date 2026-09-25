@@ -1,0 +1,4 @@
+<resources>
+    <!-- Launcher / system name of the Lite edition (overrides src/main). -->
+    <string name="app_name">Shashtna Player Lite</string>
+</resources>
