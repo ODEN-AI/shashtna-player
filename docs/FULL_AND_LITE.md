@@ -24,8 +24,19 @@ favorites.
 ## عامر IPTV (Amer IPTV edition)
 
 A third app built from the Shashtna Player Lite code, with its own name,
-artwork and Android identity. It behaves exactly like Lite (local M3U file
-only, Live TV only, same import/restore/Settings/player code).
+artwork and Android identity. Live TV, player, Settings, navigation and the
+M3U file reader are Lite's own code; it signs in like Shashtna (the same
+sign-in screen, live-only form):
+
+- **بيانات الحساب**: server, username, password (Xtream). Live channels only
+  (`get_live_categories` + `get_live_streams`); the source is kept in the
+  Keystore-encrypted store and the channel list is cached for 12 h without
+  credentials. User-Agent `AmerIPTV/1.0`.
+- **ملف M3U**: a file on the device, loaded as soon as it is picked, restored
+  on launch like in Lite.
+- No M3U link, no movies/series. Settings → «مصدر المحتوى» shows the file or
+  `username @ server` (never the password), refresh / replace, and
+  «تغيير المصدر» back to the sign-in screen.
 
 | | عامر IPTV |
 |---|---|
@@ -37,10 +48,18 @@ only, Live TV only, same import/restore/Settings/player code).
 | Metro config | `metro.amer.config.js` |
 | Edition marker | `ameriptv-edition:amer` |
 
-How the brand is applied: `metro.amer.config.js` bundles
-`src/variants/amer/brand.ts` in place of `src/design/brand.ts` and
-`src/variants/amer/editionMarker.ts` in place of
-`src/variants/lite/editionMarker.ts`. Every user-visible product name, logo
+How it is built: `metro.amer.config.js` bundles these modules in place of
+Lite's, so Shashtna Player Lite itself is unchanged (file only, no Xtream code
+in its bundle):
+
+| Lite module | عامر IPTV module |
+|---|---|
+| `src/design/brand.ts` | `src/variants/amer/brand.ts` |
+| `src/variants/lite/editionMarker.ts` | `src/variants/amer/editionMarker.ts` |
+| `src/variants/lite/LiteImportScreen.tsx` | `src/variants/amer/AmerSignInScreen.tsx` (ConnectionScreen, account + file) |
+| `src/variants/lite/useLitePlaylist.ts` | `src/variants/amer/useAmerPlaylist.ts` (account or file source) |
+| `src/variants/lite/LiteSourceSection.tsx` | `src/variants/amer/AmerSourceSection.tsx` |
+ Every user-visible product name, logo
 and brand phrase (splash, sidebar, import screen, Settings, the default accent
 name, the "live TV only" error) comes from the brand module, so the Amer
 bundle carries عامر IPTV and its logo and none of Shashtna's. The Gradle

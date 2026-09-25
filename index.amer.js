@@ -1,9 +1,9 @@
 /**
  * Entry point of عامر IPTV (Amer IPTV, com.ameriptv.player).
  *
- * The same live-TV app as Shashtna Player Lite (local M3U file only), with
- * the Amer brand: bundle it with metro.amer.config.js, which swaps in
- * src/variants/amer/brand.ts and src/variants/amer/editionMarker.ts.
+ * The Shashtna Player Lite live-TV app with the Amer brand and the Shashtna
+ * sign-in (account or M3U file, live only). Bundle it with
+ * metro.amer.config.js, which swaps in the modules under src/variants/amer.
  * Built into the `amer` product flavor; see android/app/build.gradle.
  *
  * @format

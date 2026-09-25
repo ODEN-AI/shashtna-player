@@ -1,5 +1,6 @@
 import ReactNativeBlobUtil from 'react-native-blob-util';
 
+import { BRAND } from '../design/brand';
 import {
   DownloadProgress,
   isLocalPlaylistSource,
@@ -47,8 +48,8 @@ let currentXtreamSession:
   | XtreamSession
   | null = null;
 
-const DEFAULT_USER_AGENT =
-  'ShashtnaPlayer/1.0';
+// Sent to IPTV servers; each edition identifies itself (src/design/brand.ts).
+const DEFAULT_USER_AGENT = BRAND.userAgent;
 
 function cleanBaseUrl(
   input: string,

@@ -19,7 +19,7 @@ export type PlaylistLinkMethod = {
 };
 
 export type Edition = {
-  id: 'full' | 'lite';
+  id: 'full' | 'lite' | 'amer';
   /** Drop movie/series entries while parsing M3U playlists. */
   liveOnly: boolean;
   /** Xtream movies/series loader; absent in Lite. */
@@ -28,4 +28,6 @@ export type Edition = {
   indexMedia?: MediaIndexer;
   /** Sign-in with an M3U playlist link; absent in Lite (local M3U file only). */
   playlistLink?: PlaylistLinkMethod;
+  /** Load a picked M3U file right away instead of waiting for Sign in (عامر IPTV). */
+  importFileOnPick?: boolean;
 };

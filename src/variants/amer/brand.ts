@@ -17,6 +17,8 @@ export const BRAND: Strings<typeof Base.BRAND> = {
   nameLatin: 'Amer IPTV',
   tagline: 'IPTV',
   developerCredit: 'تم تطويره عن طريق عبدالرحمن عامر',
+  statement: { ar: 'قنواتك المباشرة، بكل وضوح.', en: 'Your live channels, crystal clear.' },
+  userAgent: 'AmerIPTV/1.0',
 };
 
 export const BRAND_ASSETS: typeof Base.BRAND_ASSETS = {

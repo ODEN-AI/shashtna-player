@@ -7,16 +7,19 @@ import ReactNativeBlobUtil from 'react-native-blob-util';
 import ReactTestRenderer from 'react-test-renderer';
 
 /**
- * عامر IPTV (Amer IPTV): the Shashtna Player Lite app with its own brand and
- * Android identity (com.ameriptv.player).
+ * عامر IPTV (Amer IPTV): the Shashtna Player Lite app with its own brand,
+ * Android identity (com.ameriptv.player) and the Shashtna sign-in (account or
+ * M3U file, live channels only, no M3U link).
  *
- * The release bundle is built with metro.amer.config.js, which swaps
- * src/design/brand.ts and src/variants/lite/editionMarker.ts for the Amer
- * modules. The jest.mock calls below do the same swap, so everything rendered
- * here is exactly what the Amer APK runs.
+ * The release bundle is built with metro.amer.config.js, which swaps a few
+ * Lite modules for the Amer ones. The jest.mock calls below do the same swap,
+ * so everything rendered here is exactly what the Amer APK runs.
  */
 jest.mock('../src/design/brand', () => jest.requireActual('../src/variants/amer/brand'));
 jest.mock('../src/variants/lite/editionMarker', () => jest.requireActual('../src/variants/amer/editionMarker'));
+jest.mock('../src/variants/lite/LiteImportScreen', () => jest.requireActual('../src/variants/amer/AmerSignInScreen'));
+jest.mock('../src/variants/lite/useLitePlaylist', () => jest.requireActual('../src/variants/amer/useAmerPlaylist'));
+jest.mock('../src/variants/lite/LiteSourceSection', () => jest.requireActual('../src/variants/amer/AmerSourceSection'));
 // metro.amer.config.js extends metro.config.js (Metro's defaults, not loadable
 // under Jest); only its resolveRequest swap is exercised here.
 jest.mock('../metro.config', () => ({}));
@@ -106,12 +109,15 @@ const stripComments = (code: string) => code.replace(/\/\*[\s\S]*?\*\//g, '').re
 describe('Amer IPTV bundle contents', () => {
   const graph = amerGraph();
 
-  it('is the Lite app: same root, M3U reader/parser, Live TV, Settings', () => {
+  it('is the Lite app with the Shashtna sign-in: same root, Live TV, Settings, M3U reader, live-only Xtream', () => {
     for (const m of [
       'src/variants/lite/LiteApp.tsx',
-      'src/variants/lite/LiteImportScreen.tsx',
-      'src/variants/lite/LiteSourceSection.tsx',
-      'src/variants/lite/useLitePlaylist.ts',
+      'src/variants/amer/AmerSignInScreen.tsx',
+      'src/variants/amer/AmerSourceSection.tsx',
+      'src/variants/amer/useAmerPlaylist.ts',
+      'src/screens/Connection/ConnectionScreen.tsx',
+      'src/lib/m3u.ts',
+      'src/features/catalog/catalogCache.ts',
       'src/lib/m3uCore.ts',
       'src/lib/playlistPicker.ts',
       'src/screens/Live/LiveScreen.tsx',
@@ -128,21 +134,19 @@ describe('Amer IPTV bundle contents', () => {
     expect(graph.has('src/variants/amer/assets/amer-iptv-logo.png')).toBe(true);
     expect(graph.has('src/design/brand.ts')).toBe(false);
     expect(graph.has('src/variants/lite/editionMarker.ts')).toBe(false);
+    for (const lite of ['src/variants/lite/LiteImportScreen.tsx', 'src/variants/lite/useLitePlaylist.ts', 'src/variants/lite/LiteSourceSection.tsx']) {
+      expect(graph.has(lite)).toBe(false);
+    }
     expect([...graph].filter(m => /shashtna-player-logo|shashtna-app-background/.test(m))).toEqual([]);
   });
 
-  it('has no Xtream, sign-in, M3U link, Home, Movies, Series, VOD, TMDB or ads module', () => {
+  it('has no M3U link, Xtream VOD, Home, Movies, Series, TMDB or ads module', () => {
     const banned = [
       'App.tsx',
-      'src/lib/m3u.ts',
       'src/lib/xtreamVod.ts',
-      'src/lib/serverUrl.ts',
       'src/lib/tmdb.ts',
       'src/app/useLibrarySession.ts',
-      'src/features/catalog/catalogCache.ts',
       'src/features/catalog/mediaCatalog.ts',
-      'src/screens/Connection/ConnectionScreen.tsx',
-      'src/screens/Connection/connectionErrors.ts',
       'src/screens/Connection/playlistLink.ts',
       'src/screens/Home/HomeScreen.tsx',
       'src/screens/Movies/MoviesScreen.tsx',
@@ -257,7 +261,6 @@ const pickReturns = (uri: string, text: string, name = 'amer.m3u') => {
   native.pickPlaylist.mockResolvedValueOnce({ uri, name, size: Buffer.byteLength(text) });
 };
 const SHASHTNA = /شاشتنا|Shashtna|SHASHTNA/;
-const ACCOUNT_WORDS = ['بيانات الحساب', 'اسم المستخدم', 'كلمة المرور', 'رابط السيرفر', 'رابط M3U', 'رابط قائمة التشغيل'];
 const everything = (tree: Tree) => `${allText(tree)} | ${labels(tree).join(' | ')}`;
 
 beforeAll(() => {
@@ -273,88 +276,170 @@ beforeEach(() => {
   }) as any;
 });
 
+const XTREAM = {
+  get_live_categories: [{ category_id: '1', category_name: 'عام' }, { category_id: '2', category_name: 'رياضة' }],
+  get_live_streams: [
+    { stream_id: 11, name: 'قناة الحساب', category_id: '1' },
+    { stream_id: 12, name: 'رياضة الحساب', category_id: '2' },
+  ],
+} as Record<string, unknown[]>;
+let xtreamActions: string[] = [];
+let userAgents: string[] = [];
+const useXtreamServer = () => {
+  xtreamActions = [];
+  userAgents = [];
+  globalThis.fetch = jest.fn(async (url: string, init?: any) => {
+    const action = /action=([a-z_]+)/.exec(String(url))?.[1];
+    if (!action) throw new Error('offline'); // connectivity pings
+    xtreamActions.push(action);
+    userAgents.push(init?.headers?.['User-Agent'] || '');
+    return { ok: true, json: async () => XTREAM[action] || [] } as any;
+  }) as any;
+};
+const type = async (tree: Tree, placeholder: string, value: string) => {
+  const input = tree.root.findAll(n => n.props.placeholder === placeholder && typeof n.props.onChangeText === 'function')[0];
+  await ReactTestRenderer.act(async () => input.props.onChangeText(value));
+};
+const signIn = async (tree: Tree) => {
+  const button = tree.root.findAll(n => typeof n.props.onPress === 'function' && n.findAll(c => c.props.children === 'تسجيل الدخول').length > 0)[0];
+  await ReactTestRenderer.act(async () => {
+    await button.props.onPress();
+  });
+};
+const onSignIn = (tree: Tree) => labelled(tree, 'بيانات الحساب').length > 0;
+
 describe('عامر IPTV app', () => {
-  it('opens on "استيراد ملف M3U" with the Amer brand, and no account form, link or Shashtna name', async () => {
+  it('opens on the Shashtna-style sign-in: بيانات الحساب + ملف M3U, no M3U link, Amer brand', async () => {
     const tree = await mount();
-    await waitFor(tree, () => labelled(tree, 'رفع ملف M3U').length > 0, 'the import screen');
+    await waitFor(tree, () => onSignIn(tree), 'the sign-in screen');
     const text = everything(tree);
+    expect(labelled(tree, 'بيانات الحساب').length).toBeGreaterThan(0);
+    expect(labelled(tree, 'ملف M3U').length).toBeGreaterThan(0);
+    expect(labelled(tree, 'رابط M3U')).toEqual([]);
+    expect(tree.root.findAll(n => n.props.placeholder === 'http://provider.tv/playlist.m3u')).toEqual([]);
+    for (const field of ['http://server:port', 'أدخل اسم المستخدم', 'أدخل كلمة المرور']) {
+      expect(tree.root.findAll(n => n.props.placeholder === field).length).toBeGreaterThan(0);
+    }
     expect(text).toContain('AMER IPTV');
-    expect(text).toContain('استيراد ملف M3U');
-    expect(text).toContain('اختر ملف M3U من جهازك ليعرض عامر IPTV قنواتك المباشرة.');
     expect(text).not.toMatch(SHASHTNA);
-    for (const word of ACCOUNT_WORDS) expect(text).not.toContain(word);
-    expect(tree.root.findAll(n => typeof n.props.onChangeText === 'function')).toEqual([]);
+    expect(text).not.toMatch(/أفلام|مسلسلات/);
     expect(EDITION_MARKER).toBe('ameriptv-edition:amer');
     expect(tree.root.findAll(n => n.props.testID === 'ameriptv-edition:amer').length).toBeGreaterThan(0);
-    expect(tree.root.findAll(n => n.props.testID === 'shashtna-edition:lite')).toEqual([]);
     await unmount(tree);
   });
 
-  it('imports a local M3U: live channels only, success notice, count, and playback of the stream URL', async () => {
+  it('signs in with server + username + password: live channels only, Live TV, saved and restored', async () => {
+    useXtreamServer();
+    let tree = await mount();
+    await waitFor(tree, () => onSignIn(tree), 'the sign-in screen');
+    await type(tree, 'http://server:port', 'srv.example:8080');
+    await type(tree, 'أدخل اسم المستخدم', 'amer');
+    await type(tree, 'أدخل كلمة المرور', 'secret');
+    await signIn(tree);
+    await waitFor(tree, () => labelled(tree, 'قناة الحساب').length > 0, 'the account channels');
+    expect(xtreamActions.sort()).toEqual(['get_live_categories', 'get_live_streams']);
+    expect(userAgents.every(ua => ua === 'AmerIPTV/1.0')).toBe(true);
+    let text = everything(tree);
+    expect(text).toContain('تم تسجيل الدخول بنجاح');
+    expect(text).toContain(`عدد القنوات: ${(2).toLocaleString('ar-IQ')}`);
+    expect(text).not.toMatch(SHASHTNA);
+
+    await press(tree, 'قناة الحساب');
+    await waitFor(tree, () => tree.root.findAll(n => n.props.source?.uri === 'http://srv.example:8080/live/amer/secret/11.ts').length > 0, 'the player');
+    await unmount(tree);
+
+    // Saved (Keystore store in the app; in-memory here), restored from the cache without asking again.
+    expect(await loadConnectionSource()).toContain('username=amer');
+    xtreamActions = [];
+    tree = await mount();
+    await waitFor(tree, () => labelled(tree, 'قناة الحساب').length > 0, 'the restored channels');
+    expect(xtreamActions).toEqual([]); // from the 12 h cache
+    await press(tree, 'الإعدادات');
+    await waitFor(tree, () => allText(tree).includes('مصدر المحتوى'), 'Settings');
+    text = everything(tree);
+    expect(text).toContain('حساب IPTV');
+    expect(text).toContain('amer @ srv.example:8080');
+    expect(text).not.toContain('secret');
+    expect(text).toContain('تحديث القنوات');
+    expect(text).not.toMatch(SHASHTNA);
+
+    // تغيير المصدر → back to the sign-in screen, source forgotten.
+    await press(tree, 'تغيير المصدر');
+    await waitFor(tree, () => onSignIn(tree), 'the sign-in screen');
+    expect(await loadConnectionSource()).toBeNull();
+    await unmount(tree);
+  });
+
+  it('a wrong account shows the sign-in error and stays on the sign-in screen', async () => {
+    globalThis.fetch = jest.fn(async (url: string) => {
+      if (!/action=/.test(String(url))) throw new Error('offline');
+      return { ok: false, status: 401, json: async () => ({}) } as any;
+    }) as any;
     const tree = await mount();
-    await waitFor(tree, () => labelled(tree, 'رفع ملف M3U').length > 0, 'the import screen');
+    await waitFor(tree, () => onSignIn(tree), 'the sign-in screen');
+    await type(tree, 'http://server:port', 'srv.example:8080');
+    await type(tree, 'أدخل اسم المستخدم', 'amer');
+    await type(tree, 'أدخل كلمة المرور', 'wrong');
+    await signIn(tree);
+    await waitFor(tree, () => allText(tree).includes('تعذر تسجيل الدخول'), 'the sign-in error');
+    expect(onSignIn(tree)).toBe(true);
+    expect(await loadConnectionSource()).toBeNull();
+    await unmount(tree);
+  });
+
+  it('ملف M3U: picking a file imports it at once — live only, notice, count, playback, Settings', async () => {
+    const tree = await mount();
+    await waitFor(tree, () => onSignIn(tree), 'the sign-in screen');
+    await press(tree, 'ملف M3U');
     pickReturns(URI, PLAYLIST);
-    await press(tree, 'رفع ملف M3U');
+    await press(tree, 'اختيار ملف قائمة التشغيل');
     await waitFor(tree, () => labelled(tree, 'العراقية').length > 0, 'the imported channels');
     let text = everything(tree);
     expect(text).toContain('تم تحميل ملف M3U بنجاح');
     expect(text).toContain(`عدد القنوات: ${(2).toLocaleString('ar-IQ')}`);
-    expect(text).toContain('عامر IPTV'); // sidebar brand
     expect(text).not.toMatch(/فيلم الرسالة|باب الحارة/);
     expect(text).not.toMatch(SHASHTNA);
-    expect(globalThis.fetch).not.toHaveBeenCalled();
 
     await press(tree, 'العراقية');
     await waitFor(tree, () => tree.root.findAll(n => n.props.source?.uri === 'http://srv:8080/live/u/p/1.ts').length > 0, 'the player');
-    text = everything(tree);
-    expect(text).not.toMatch(SHASHTNA);
+    expect(everything(tree)).not.toMatch(SHASHTNA);
     await unmount(tree);
-  });
 
-  it('Settings: M3U source section, Amer accent name, no Shashtna name, no account or link', async () => {
-    const tree = await mount();
-    await waitFor(tree, () => labelled(tree, 'رفع ملف M3U').length > 0, 'the import screen');
-    pickReturns(URI, PLAYLIST);
-    await press(tree, 'رفع ملف M3U');
-    await waitFor(tree, () => labelled(tree, 'العراقية').length > 0, 'the imported channels');
-    await press(tree, 'الإعدادات');
-    await waitFor(tree, () => allText(tree).includes('مصدر المحتوى'), 'Settings');
-    const text = everything(tree);
-    for (const word of ['مصدر المحتوى', 'ملف M3U الحالي', 'amer.m3u', `القنوات: ${(2).toLocaleString('ar-IQ')}`, 'استبدال ملف M3U', 'إعادة قراءة الملف', 'أزرق عامر']) {
+    const again = await mount();
+    await waitFor(again, () => labelled(again, 'العراقية').length > 0, 'the restored channels');
+    await press(again, 'الإعدادات');
+    await waitFor(again, () => allText(again).includes('مصدر المحتوى'), 'Settings');
+    text = everything(again);
+    for (const word of ['ملف M3U الحالي', 'amer.m3u', `القنوات: ${(2).toLocaleString('ar-IQ')}`, 'استبدال ملف M3U', 'إعادة قراءة الملف', 'تغيير المصدر', 'أزرق عامر']) {
       expect(text).toContain(word);
     }
     expect(text).not.toMatch(SHASHTNA);
-    for (const word of ACCOUNT_WORDS) expect(text).not.toContain(word);
-    await unmount(tree);
+    await unmount(again);
   });
 
-  it('restores its playlist after a restart, and explains a missing file on the import screen', async () => {
+  it('a saved file that is gone reopens the ملف M3U tab with the read error', async () => {
     let tree = await mount();
-    await waitFor(tree, () => labelled(tree, 'رفع ملف M3U').length > 0, 'the import screen');
+    await waitFor(tree, () => onSignIn(tree), 'the sign-in screen');
+    await press(tree, 'ملف M3U');
     pickReturns(URI, PLAYLIST);
-    await press(tree, 'رفع ملف M3U');
+    await press(tree, 'اختيار ملف قائمة التشغيل');
     await waitFor(tree, () => labelled(tree, 'العراقية').length > 0, 'the imported channels');
     await unmount(tree);
-    expect(await loadConnectionSource()).toBe(URI);
-
-    tree = await mount();
-    await waitFor(tree, () => labelled(tree, 'العراقية').length > 0, 'the restored channels');
-    await unmount(tree);
-
     disk.delete(URI);
     tree = await mount();
     await waitFor(tree, () => allText(tree).includes('تعذر قراءة ملف M3U'), 'the read error');
-    const text = everything(tree);
-    expect(text).toContain('استيراد ملف M3U');
-    expect(text).not.toMatch(SHASHTNA);
+    const fileTab = labelled(tree, 'ملف M3U')[0];
+    expect(fileTab.props.accessibilityState).toMatchObject({ selected: true });
+    expect(everything(tree)).not.toMatch(SHASHTNA);
     await unmount(tree);
   });
 
   it('a file without live channels is rejected with the Amer wording', async () => {
     const tree = await mount();
-    await waitFor(tree, () => labelled(tree, 'رفع ملف M3U').length > 0, 'the import screen');
+    await waitFor(tree, () => onSignIn(tree), 'the sign-in screen');
+    await press(tree, 'ملف M3U');
     pickReturns(URI, '#EXTM3U\n#EXTINF:-1 group-title="أفلام",فيلم\nhttp://srv/movie/u/p/9.mp4\n');
-    await press(tree, 'رفع ملف M3U');
+    await press(tree, 'اختيار ملف قائمة التشغيل');
     await waitFor(tree, () => allText(tree).includes('لم يتم العثور على قنوات مباشرة داخل الملف'), 'the no-live message');
     expect(allText(tree)).toContain('عامر IPTV يعرض البث المباشر فقط.');
     expect(everything(tree)).not.toMatch(SHASHTNA);

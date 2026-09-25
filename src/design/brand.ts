@@ -15,6 +15,10 @@ export const BRAND = {
   nameLatin: 'Shashtna Player',
   tagline: 'PLAYER',
   developerCredit: 'تم تطويره عن طريق عبدالرحمن عامر',
+  /** Brand statement on the sign-in screen (wording fixed by the brand). */
+  statement: { ar: 'كل ما تحب، على شاشة واحدة.', en: 'Everything you love, on one screen.' },
+  /** User-Agent sent to IPTV servers. */
+  userAgent: 'ShashtnaPlayer/1.0',
 } as const;
 
 export const BRAND_ASSETS = {

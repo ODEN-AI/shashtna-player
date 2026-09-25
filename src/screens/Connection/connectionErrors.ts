@@ -1,3 +1,4 @@
+import { BRAND_LITE } from '../../design/brand';
 import { redactSecrets } from '../../lib/redact';
 
 export { redactSecrets };
@@ -30,8 +31,8 @@ export function describeConnectionError(error: unknown, ar: boolean): { message:
   if (name === 'NoLiveChannelsError') {
     return {
       message: pick0(
-        'لم يتم العثور على قنوات مباشرة داخل الملف. شاشتنا Lite تعرض البث المباشر فقط.',
-        'No live TV channels were found in the file. Shashtna Player Lite shows live TV only.',
+        `لم يتم العثور على قنوات مباشرة داخل الملف. ${BRAND_LITE.liveOnlyNote.ar}`,
+        `No live TV channels were found in the file. ${BRAND_LITE.liveOnlyNote.en}`,
       ),
       technical: '',
     };

@@ -12,6 +12,7 @@ import AppIcon, { AppIconName } from '../../components/common/AppIcon';
 import { AppLanguage, AppPreferencesProvider } from '../../design/AppPreferencesContext';
 import { BRAND_LITE } from '../../design/brand';
 import { SHASHTNA_FONT, SHASHTNA_THEME } from '../../design/theme';
+import { isLocalPlaylistSource } from '../../lib/m3uCore';
 import type { M3UChannel } from '../../lib/m3uCore';
 import type { PickedPlaylist } from '../../lib/playlistPicker';
 import Sidebar from '../../navigation/Sidebar';
@@ -59,7 +60,13 @@ export const START_PAGE: Page = 'live';
 export const IMPORT_NOTICE_MS = 6000;
 
 /** Confirmation shown over Live TV after an M3U file was imported. */
-export function importNoticeText(count: number, ar: boolean): { title: string; detail: string } {
+export function importNoticeText(count: number, ar: boolean, source: 'file' | 'account' = 'file'): { title: string; detail: string } {
+  // عامر IPTV can also sign in with an account (its session swaps in for useLitePlaylist).
+  if (source === 'account') {
+    return ar
+      ? { title: 'تم تسجيل الدخول بنجاح', detail: `عدد القنوات: ${count.toLocaleString('ar-IQ')}` }
+      : { title: 'Signed in', detail: `Channels: ${count.toLocaleString('en-US')}` };
+  }
   return ar
     ? { title: 'تم تحميل ملف M3U بنجاح', detail: `عدد القنوات: ${count.toLocaleString('ar-IQ')}` }
     : { title: 'M3U file loaded', detail: `Channels: ${count.toLocaleString('en-US')}` };
@@ -217,15 +224,21 @@ function LiteContent() {
         }
       >
         <Animated.View style={[styles.page, transition]}>{content}</Animated.View>
-        {importNotice ? <ImportNotice count={catalog.live.length} ar={language === 'ar'} /> : null}
+        {importNotice ? (
+          <ImportNotice
+            count={catalog.live.length}
+            ar={language === 'ar'}
+            source={library.playlist && !isLocalPlaylistSource(library.playlist.uri) ? 'account' : 'file'}
+          />
+        ) : null}
       </AppShell>
     </AppPreferencesProvider>
   );
 }
 
 /** "M3U file loaded · N channels" banner; not focusable, so the remote stays on the channels. */
-function ImportNotice({ count, ar }: { count: number; ar: boolean }) {
-  const { title, detail } = importNoticeText(count, ar);
+function ImportNotice({ count, ar, source }: { count: number; ar: boolean; source: 'file' | 'account' }) {
+  const { title, detail } = importNoticeText(count, ar, source);
   return (
     <View
       pointerEvents="none"

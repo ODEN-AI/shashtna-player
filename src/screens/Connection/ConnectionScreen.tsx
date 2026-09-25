@@ -28,10 +28,20 @@ type Method = ConnectionMethod;
 
 
 type Props = {
-  onConnected: (channels: M3UChannel[], source: string) => void;
+  /** `label`: display name of the source (the picked file's name, or `user @ host`). */
+  onConnected: (channels: M3UChannel[], source: string, label?: string) => void | Promise<unknown>;
   /** What to load: live only (Lite) or live + VOD (Full). */
   edition: Edition;
+  /** Tab to open on (e.g. the file tab after a saved file could not be reloaded). */
+  initialMethod?: Method;
+  /** Why the saved source could not be restored; shown until the user acts. */
+  restoreError?: unknown;
 };
+
+/** "server:port" of a source URL, for display (never the credentials). */
+function hostOf(source: string): string {
+  return /^https?:\/\/([^/?#]+)/i.exec(source)?.[1] || '';
+}
 
 async function checkNetworkConnection(): Promise<boolean> {
   const endpoints = [
@@ -57,7 +67,7 @@ async function checkNetworkConnection(): Promise<boolean> {
 }
 
 /** Brand statement shown under the name. Arabic wording is fixed by the brand. */
-const TAGLINE = { ar: 'كل ما تحب، على شاشة واحدة.', en: 'Everything you love, on one screen.' };
+const TAGLINE = BRAND.statement;
 
 /**
  * Sign-in / connection screen.
@@ -73,7 +83,7 @@ const TAGLINE = { ar: 'كل ما تحب، على شاشة واحدة.', en: 'Eve
  * Shashtna Player (Full) only. Shashtna Player Lite has no sign-in: its only
  * source is a local M3U file (src/variants/lite/LiteImportScreen.tsx).
  */
-export default function ConnectionScreen({ onConnected, edition }: Props) {
+export default function ConnectionScreen({ onConnected, edition, initialMethod, restoreError }: Props) {
   const liveOnly = edition.liveOnly;
   // The M3U link method exists only when the edition supplies it (Full). Lite
   // offers the account and a local M3U file.
@@ -88,7 +98,7 @@ export default function ConnectionScreen({ onConnected, edition }: Props) {
   const rowDirection = ar ? 'row-reverse' : 'row';
   const align = ar ? 'right' : 'left';
 
-  const [method, setMethod] = useState<Method>('account');
+  const [method, setMethod] = useState<Method>(initialMethod && methods.includes(initialMethod) ? initialMethod : 'account');
   const [playlistUrl, setPlaylistUrl] = useState('');
   const [pickedFile, setPickedFile] = useState<PickedPlaylist | null>(null);
   const [server, setServer] = useState('');
@@ -99,7 +109,9 @@ export default function ConnectionScreen({ onConnected, edition }: Props) {
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [count, setCount] = useState(0);
-  const [error, setError] = useState<{ message: string; technical: string } | null>(null);
+  const [error, setError] = useState<{ message: string; technical: string } | null>(() =>
+    restoreError ? describeConnectionError(restoreError, ar) : null,
+  );
   const [showTechnical, setShowTechnical] = useState(false);
 
   const [networkConnected, setNetworkConnected] = useState<boolean | null>(null);
@@ -167,7 +179,8 @@ export default function ConnectionScreen({ onConnected, edition }: Props) {
       }
 
       if (method === 'file') setProgress(100);
-      onConnected(channels, source);
+      const label = method === 'account' ? `${username.trim()} @ ${hostOf(source)}` : method === 'file' ? file?.name : undefined;
+      await onConnected(channels, source, label);
     } catch (e) {
       setError(describeConnectionError(e, ar));
     } finally {
@@ -182,6 +195,8 @@ export default function ConnectionScreen({ onConnected, edition }: Props) {
       const picked = await pickPlaylistFile();
       if (!picked) return; // cancelled
       setPickedFile(picked);
+      // عامر IPTV: the picked file is loaded at once (no separate Sign in).
+      if (edition.importFileOnPick) await connect(picked);
     } catch (e) {
       setError(describeConnectionError(e, ar));
     }
