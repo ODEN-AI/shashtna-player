@@ -18,6 +18,8 @@ export const BRAND: Strings<typeof Base.BRAND> = {
   tagline: 'IPTV',
   developerCredit: 'تم تطويره عن طريق عبدالرحمن عامر',
   statement: { ar: 'قنواتك المباشرة، بكل وضوح.', en: 'Your live channels, crystal clear.' },
+  // No player badge: the loading screen shows the channel's real logo, or nothing.
+  playerMark: '',
   userAgent: 'AmerIPTV/1.0',
 };
 

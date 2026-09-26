@@ -17,6 +17,8 @@ export const BRAND = {
   developerCredit: 'تم تطويره عن طريق عبدالرحمن عامر',
   /** Brand statement on the sign-in screen (wording fixed by the brand). */
   statement: { ar: 'كل ما تحب، على شاشة واحدة.', en: 'Everything you love, on one screen.' },
+  /** Badge in the player while a channel opens; '' = none (show the channel's own logo). */
+  playerMark: 'ش',
   /** User-Agent sent to IPTV servers. */
   userAgent: 'ShashtnaPlayer/1.0',
 } as const;

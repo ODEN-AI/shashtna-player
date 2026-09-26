@@ -5,6 +5,7 @@ import { Text } from '../../components/common/Typography';
 import type { M3UChannel } from '../../lib/m3uCore';
 import { SHASHTNA_FONT, SHASHTNA_THEME } from '../../design/theme';
 import { usePalette } from '../../design/palette';
+import { BRAND } from '../../design/brand';
 
 export type ChannelBannerState = {
   channel: M3UChannel;
@@ -44,13 +45,16 @@ function ChannelBanner({ state, loading, ar }: Props) {
         <View style={[styles.number, { experimental_backgroundImage: palette.accent.gradient }]}>
           <Text style={styles.numberText}>{number}</Text>
         </View>
-        <View style={styles.logoBox}>
-          {channel.logo && !logoFailed ? (
+        {channel.logo && !logoFailed ? (
+          <View style={styles.logoBox}>
             <Image source={{ uri: channel.logo }} style={styles.logo} onError={() => setLogoFailed(true)} />
-          ) : (
+          </View>
+        ) : BRAND.playerMark ? (
+          // Shashtna editions: the channel's initials stand in for a missing logo.
+          <View style={styles.logoBox}>
             <Text style={styles.logoFallback}>{channel.name.trim().slice(0, 2).toUpperCase()}</Text>
-          )}
-        </View>
+          </View>
+        ) : null /* عامر IPTV: no placeholder artwork, only a real logo */}
         <View style={styles.text}>
           {/* Channel names come from the playlist: shown as-is, isolated from UI strings. */}
           <Text numberOfLines={1} style={[styles.name, { textAlign: ar ? 'right' : 'left' }]}>

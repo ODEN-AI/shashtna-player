@@ -7,12 +7,16 @@
 } from 'react';
 
 import {
+  ActivityIndicator,
   BackHandler,
+  Image,
   useTVEventHandler,
   Dimensions,
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
+  TVFocusGuideView,
   View,
 } from 'react-native';
 import { Text } from '../../components/common/Typography';
@@ -30,6 +34,8 @@ import SeekBar from '../../features/player/SeekBar';
 import type { MovieDetailsProps } from '../../features/details/MovieDetailsScreen';
 import type { SeriesDetailsProps } from '../../features/details/SeriesDetailsScreen';
 import ChannelBanner, { ChannelBannerState } from '../../features/player/ChannelBanner';
+import ChannelListPanel from '../../features/player/ChannelListPanel';
+import { BRAND } from '../../design/brand';
 import { describePlaybackError } from '../../features/player/playbackErrors';
 import { createProgressStore, formatClock, ProgressStore } from '../../features/player/progressStore';
 import {
@@ -413,7 +419,36 @@ const GLYPH_ICONS: Record<string, { name: AppIconName; flip?: boolean }> = {
   '×': { name: 'close' },
   '▲': { name: 'channelUp' },
   '▼': { name: 'channelDown' },
+  '☰': { name: 'menu' },
 };
+
+/** Live TV controls row: a vertical focus trap on Android TV (see tvZap). */
+const ControlsRow = Platform.isTV ? TVFocusGuideView : View;
+
+/**
+ * Badge shown while a channel opens. The edition's own player mark (Shashtna:
+ * «ش»); عامر IPTV has none, so it shows the channel's real logo when the
+ * playlist has one, otherwise just a spinner, never a placeholder logo.
+ */
+function LoadingMark({ channel }: { channel: M3UChannel }) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [channel.logo]);
+  if (BRAND.playerMark) {
+    return (
+      <View style={styles.loadingLogo}>
+        <Text style={styles.loadingLogoText}>{BRAND.playerMark}</Text>
+      </View>
+    );
+  }
+  if (channel.logo && !failed) {
+    return (
+      <View style={styles.loadingChannelLogo} testID="player-loading-channel-logo">
+        <Image source={{ uri: channel.logo }} style={styles.loadingChannelLogoImage} resizeMode="contain" onError={() => setFailed(true)} />
+      </View>
+    );
+  }
+  return <ActivityIndicator size="large" color="#FFFFFF" testID="player-loading-spinner" />;
+}
 
 function ControlButton({
   icon,
@@ -423,12 +458,15 @@ function ControlButton({
   preferred = false,
   compact = false,
   large = false,
+  tvFocusable = true,
 }: {
   icon: string;
   label: string;
   onPress: () => void;
   disabled?: boolean;
   preferred?: boolean;
+  /** false: never takes TV focus (still pressable by touch). */
+  tvFocusable?: boolean;
   compact?: boolean;
   /** Bigger touch target (mobile channel switching). */
   large?: boolean;
@@ -443,7 +481,7 @@ function ControlButton({
   return (
     <Pressable
       focusable={
-        !disabled
+        !disabled && tvFocusable
       }
       hasTVPreferredFocus={
         preferred
@@ -1247,6 +1285,20 @@ export default function PlayerScreen({
     channel.contentType === 'live' &&
     (liveQueue?.length ?? 0) > 1;
 
+  /**
+   * Android TV / TV box, live channel with a queue: D-pad UP/DOWN always
+   * zap (no OK, no control bar needed), so the controls have a single
+   * focusable row and vertical focus moves are trapped (see the render).
+   */
+  const tvZap = Platform.isTV && canZap;
+
+  // In-player channel list («قائمة القنوات»); playback keeps running behind it.
+  const [channelList, setChannelList] = useState(false);
+  const channelListRef = useRef(false);
+  channelListRef.current = channelList;
+  // After closing the list, TV focus goes back to its button.
+  const [focusListButton, setFocusListButton] = useState(false);
+
   // Refs read by long-lived callbacks (TV key handler, timers, progress).
   const durationRef = useRef(0);
   durationRef.current = duration;
@@ -1287,6 +1339,7 @@ export default function PlayerScreen({
         if (
           paused ||
           menu ||
+          channelListRef.current ||
           scrubbing ||
           isSeriesDetails ||
           isMovieDetails
@@ -1324,6 +1377,21 @@ export default function PlayerScreen({
         scheduleHideControls,
       ],
     );
+
+  const openChannelList = useCallback(() => {
+    clearHideTimer();
+    setFocusListButton(false);
+    setMenu(null);
+    setChannelList(true);
+  }, [clearHideTimer]);
+
+  /** BACK or ×: back to the player, focus on «قائمة القنوات», playback untouched. */
+  const closeChannelList = useCallback(() => {
+    channelListRef.current = false;
+    setChannelList(false);
+    setFocusListButton(true);
+    wakeControls();
+  }, [wakeControls]);
 
   const goBack =
     useCallback(
@@ -1383,6 +1451,11 @@ export default function PlayerScreen({
       BackHandler.addEventListener(
         'hardwareBackPress',
         () => {
+          if (channelListRef.current) {
+            closeChannelList();
+            return true;
+          }
+
           if (
             menu
           ) {
@@ -1404,6 +1477,7 @@ export default function PlayerScreen({
     return () =>
       subscription.remove();
   }, [
+    closeChannelList,
     goBack,
     menu,
     wakeControls,
@@ -2084,6 +2158,24 @@ export default function PlayerScreen({
     [],
   );
 
+  /** Switches playback to queue[index] (shared by zapping and the channel list). */
+  const tuneTo = useCallback(
+    (index: number) => {
+      const queue = liveQueue || [];
+      const next = queue[index];
+      if (!next) return;
+      suppressWakeRef.current = true;
+      clearHideTimer();
+      setShowControls(false);
+      setMenu(null);
+      setFocusListButton(false);
+      setZappedChannel(next.id === channel.id ? null : next);
+      setBanner({ channel: next, number: index + 1, total: queue.length, pending: false });
+      bannerTimerRef.current = setTimeout(() => setBanner(null), ZAP_BANNER_MS * 3);
+    },
+    [channel, clearHideTimer, liveQueue],
+  );
+
   const zap =
     useCallback(
       (delta: 1 | -1) => {
@@ -2143,29 +2235,46 @@ export default function PlayerScreen({
             return;
           }
 
-          const next = queue[index];
-
-          suppressWakeRef.current = true;
-          clearHideTimer();
-          setShowControls(false);
-          setMenu(null);
-          setZappedChannel(next.id === channel.id ? null : next);
-          setBanner(value => (value ? { ...value, pending: false } : value));
-          bannerTimerRef.current = setTimeout(() => setBanner(null), ZAP_BANNER_MS * 3);
+          tuneTo(index);
         }, ZAP_COMMIT_MS);
       },
-      [canZap, channel, clearHideTimer, liveQueue, zappedChannel],
+      [canZap, channel, liveQueue, tuneTo, zappedChannel],
     );
+
+  /** «قائمة القنوات»: tune straight to the chosen channel (no coalescing delay). */
+  const selectFromList = useCallback(
+    (index: number) => {
+      if (zapTimerRef.current) {
+        clearTimeout(zapTimerRef.current);
+        zapTimerRef.current = null;
+      }
+      zapTargetRef.current = null;
+      channelListRef.current = false;
+      setChannelList(false);
+      setFocusListButton(false);
+      const queue = liveQueue || [];
+      const current = zappedChannel || channel;
+      if (queue[index] && String(queue[index].id) === String(current.id)) {
+        wakeControls(); // already playing: just close the list
+        return;
+      }
+      if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
+      tuneTo(index);
+    },
+    [channel, liveQueue, tuneTo, wakeControls, zappedChannel],
+  );
 
   const showControlsRef = useRef(showControls);
   showControlsRef.current = showControls;
   const menuRef = useRef(menu);
   menuRef.current = menu;
+  const tvZapRef = useRef(tvZap);
+  tvZapRef.current = tvZap;
 
   useTVEventHandler(
     useCallback(
       evt => {
-        if (!evt || evt.eventKeyAction === 1 || !canZap || menuRef.current) {
+        if (!evt || evt.eventKeyAction === 1 || !canZap || menuRef.current || channelListRef.current) {
           return;
         }
 
@@ -2175,10 +2284,21 @@ export default function PlayerScreen({
           return;
         }
 
-        // D-pad UP/DOWN zap only while the control panel is hidden; when it is
-        // visible they move focus between controls as usual.
-        if (!showControlsRef.current && (evt.eventType === 'up' || evt.eventType === 'down')) {
-          zap(evt.eventType === 'up' ? -1 : 1);
+        if (evt.eventType !== 'up' && evt.eventType !== 'down') {
+          return;
+        }
+
+        // TV / TV box: UP = next channel, DOWN = previous, straight away, whether
+        // or not the control bar is showing (its focus cannot move vertically).
+        if (tvZapRef.current) {
+          zap(evt.eventType === 'up' ? 1 : -1);
+          return;
+        }
+
+        // Other devices with a D-pad: only while the control panel is hidden, so
+        // arrows still move focus between visible controls.
+        if (!showControlsRef.current) {
+          zap(evt.eventType === 'up' ? 1 : -1);
         }
       },
       [canZap, zap],
@@ -2357,7 +2477,8 @@ export default function PlayerScreen({
 
       {!showControls &&
         !error &&
-        !ended && (
+        !ended &&
+        !channelList && (
           <Pressable
             focusable
             hasTVPreferredFocus
@@ -2390,7 +2511,10 @@ export default function PlayerScreen({
                   onPress={
                     goBack
                   }
-                  preferred
+                  // TV live: BACK key and «خروج» cover it; out of the focus
+                  // order so UP/DOWN cannot move focus to it (they zap).
+                  preferred={!tvZap}
+                  tvFocusable={!tvZap}
                   compact
                 />
 
@@ -2485,7 +2609,10 @@ export default function PlayerScreen({
                   </View>
                 )}
 
-                <View
+                <ControlsRow
+                  // TV live: this row is the only focusable one and vertical
+                  // focus moves are trapped, so UP/DOWN only zap.
+                  {...(tvZap ? { trapFocusUp: true, trapFocusDown: true } : {})}
                   style={[
                     styles.controlsRow,
                     { flexDirection: ar ? 'row-reverse' : 'row' },
@@ -2501,6 +2628,7 @@ export default function PlayerScreen({
                   ) : null}
 
                   <ControlButton
+                    preferred={tvZap && !focusListButton}
                     icon={
                       paused
                         ? '▶'
@@ -2522,6 +2650,15 @@ export default function PlayerScreen({
                       label={ar ? 'القناة التالية' : 'Next channel'}
                       onPress={() => zap(1)}
                       large
+                    />
+                  ) : null}
+
+                  {canZap ? (
+                    <ControlButton
+                      icon="☰"
+                      label={ar ? 'قائمة القنوات' : 'Channels'}
+                      onPress={openChannelList}
+                      preferred={focusListButton}
                     />
                   ) : null}
 
@@ -2619,7 +2756,7 @@ export default function PlayerScreen({
                     }
                     compact
                   />
-                </View>
+                </ControlsRow>
               </View>
             </View>
           </>
@@ -2651,19 +2788,7 @@ export default function PlayerScreen({
               styles.loadingOverlay
             }
           >
-            <View
-              style={
-                styles.loadingLogo
-              }
-            >
-              <Text
-                style={
-                  styles.loadingLogoText
-                }
-              >
-                ش
-              </Text>
-            </View>
+            <LoadingMark channel={playbackChannel} />
 
             <Text
               style={
@@ -2838,6 +2963,16 @@ export default function PlayerScreen({
             </View>
           </View>
         )}
+
+      {channelList && canZap ? (
+        <ChannelListPanel
+          channels={liveQueue || []}
+          currentId={String(playbackChannel.id)}
+          ar={ar}
+          onSelect={selectFromList}
+          onClose={closeChannelList}
+        />
+      ) : null}
 
       {menu ===
         'audio' && (
@@ -3222,6 +3357,20 @@ const styles =
         height: 0,
       },
       elevation: 14,
+    },
+
+    loadingChannelLogo: {
+      width: 120,
+      height: 84,
+      borderRadius: 18,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: 'rgba(255,255,255,0.08)',
+    },
+
+    loadingChannelLogoImage: {
+      width: 100,
+      height: 68,
     },
 
     loadingLogoText: {
