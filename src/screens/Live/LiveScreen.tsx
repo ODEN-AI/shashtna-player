@@ -25,7 +25,7 @@ type Props = {
   /** Built once per source; categories are Map lookups (see features/catalog). */
   catalog: Catalog;
   /** `queue` is the list currently on screen; the player zaps through it. */
-  onOpenPlayer: (channel: M3UChannel, queue: readonly M3UChannel[]) => void;
+  onOpenPlayer: (channel: M3UChannel, queue: readonly M3UChannel[], scope?: string) => void;
   /**
    * Show the "Favorites" filter at the top of the categories (Full). Lite keeps
    * favorites as channel-level state only (long-press + heart), with no
@@ -136,8 +136,9 @@ export default function LiveScreen({ catalog, onOpenPlayer, onBackHome, homeLabe
   const filtered = useMemo(() => searcher(base, query), [searcher, base, query]);
 
   const openChannel = useCallback(
-    (channel: M3UChannel) => onOpenPlayer(channel, filtered),
-    [filtered, onOpenPlayer],
+    // scope: category key, plus ':search' when a search narrows it (the text itself is not passed on).
+    (channel: M3UChannel) => onOpenPlayer(channel, filtered, query.trim() ? `${group}:search` : group),
+    [filtered, group, onOpenPlayer, query],
   );
 
   // Returning from the player: start the list at the channel that was playing.

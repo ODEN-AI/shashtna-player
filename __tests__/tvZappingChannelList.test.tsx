@@ -50,7 +50,15 @@ const texts = (tree: Tree) =>
     .join(' | ');
 const byLabel = (tree: Tree, label: string) =>
   tree.root.findAll(n => n.props.accessibilityLabel === label && typeof n.props.onPress === 'function' && typeof n.type !== 'string')[0];
-const key = (eventType: string) => ReactTestRenderer.act(() => mockRemote.tv?.({ eventType, eventKeyAction: 0 }));
+// One physical press, exactly as React Native tvOS delivers it on Android
+// (ReactAndroidHWInputDeviceHelper): a single onHWKeyEvent with ACTION_UP (1).
+// Key-down (0) is not sent unless ReactFeatureFlags.enableKeyDownEvents is on.
+// The earlier version of this helper fired 0, which a real TV never sends, so
+// the tests passed while the remote did nothing (see "real Android key contract").
+const KEY_UP = 1;
+const KEY_DOWN = 0;
+const key = (eventType: string) => ReactTestRenderer.act(() => mockRemote.tv?.({ eventType, eventKeyAction: KEY_UP }));
+const keyRaw = (eventType: string, eventKeyAction: number) => ReactTestRenderer.act(() => mockRemote.tv?.({ eventType, eventKeyAction }));
 const back = () => ReactTestRenderer.act(() => {
   for (let i = mockRemote.back.length - 1; i >= 0; i -= 1) if (mockRemote.back[i]()) return;
 });
@@ -253,5 +261,203 @@ describe('channel list grouping', () => {
     const { rows } = buildChannelRows(many);
     expect(rows.length).toBe(20000 + 40);
     expect(Date.now() - t).toBeLessThan(500);
+  });
+});
+
+/* ------------------------------------------------------------------------- */
+/* Real-device regressions (Amer TV test build): the contract, not the mocks. */
+/* ------------------------------------------------------------------------- */
+
+const { setDiagnosticsSink } = require('../src/lib/tvDiagnostics');
+function captureDiag(): { lines: string[]; of: (tag: string) => any[]; stop: () => void } {
+  const lines: string[] = [];
+  setDiagnosticsSink((line: string) => lines.push(line));
+  return {
+    lines,
+    of: (tag: string) => lines.filter(l => l.startsWith(`${tag} `)).map(l => JSON.parse(l.slice(tag.length + 1))),
+    stop: () => setDiagnosticsSink(null),
+  };
+}
+
+describe('real Android key contract (the physical-remote bug)', () => {
+  it('the installed React Native TV layer only emits D-pad/CH keys on ACTION_UP (key-down needs a flag this app does not set)', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const root = path.dirname(require.resolve('react-native/package.json'));
+    const helper = fs.readFileSync(path.join(root, 'ReactAndroid/src/main/java/com/facebook/react/modules/core/ReactAndroidHWInputDeviceHelper.java'), 'utf8');
+    const rootView = fs.readFileSync(path.join(root, 'ReactAndroid/src/main/java/com/facebook/react/ReactRootView.java'), 'utf8');
+    // ReactRootView uses this helper for every key...
+    expect(rootView).toContain('import com.facebook.react.modules.core.ReactAndroidHWInputDeviceHelper;');
+    expect(rootView).toMatch(/mAndroidHWInputDeviceHelper\.handleKeyEvent\(ev, context\);\s*}\s*return super\.dispatchKeyEvent\(ev\);/);
+    // ...which sends ACTION_UP, and ACTION_DOWN only with enableKeyDownEvents (or a long press).
+    expect(helper).toMatch(/\(eventKeyAction == KeyEvent\.ACTION_UP\) \|\|\s*\(eventKeyAction == KeyEvent\.ACTION_DOWN && !longPressEventActive && ReactFeatureFlags\.enableKeyDownEvents\)/);
+    expect(helper).toContain('.put(KeyEvent.KEYCODE_DPAD_UP, "up")');
+    expect(helper).toContain('.put(KeyEvent.KEYCODE_DPAD_DOWN, "down")');
+    // The app never turns key-down events on, so a press reaches JS as eventKeyAction 1 only.
+    const javaDir = path.join(__dirname, '../android/app/src/main/java');
+    const walk = (dir: string): string[] => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e: any) => (e.isDirectory() ? walk(path.join(dir, e.name)) : [path.join(dir, e.name)]));
+    for (const file of walk(javaDir)) expect(fs.readFileSync(file, 'utf8')).not.toContain('enableKeyDownEvents');
+  });
+
+  it('channelStepFor: key-up steps, key-down halves never do, one step per press', () => {
+    const { channelStepFor } = require('../src/lib/tvRemote');
+    expect(channelStepFor({ eventType: 'up', eventKeyAction: 1 })).toBe(1);
+    expect(channelStepFor({ eventType: 'down', eventKeyAction: 1 })).toBe(-1);
+    expect(channelStepFor({ eventType: 'channelUp', eventKeyAction: 1 })).toBe(1);
+    expect(channelStepFor({ eventType: 'channelDown', eventKeyAction: 1 })).toBe(-1);
+    expect(channelStepFor({ eventType: 'longUp', eventKeyAction: 1 })).toBe(1);
+    expect(channelStepFor({ eventType: 'up', eventKeyAction: 0 })).toBeNull();
+    expect(channelStepFor({ eventType: 'longDown', eventKeyAction: 0 })).toBeNull();
+    expect(channelStepFor({ eventType: 'left', eventKeyAction: 1 })).toBeNull();
+    expect(channelStepFor({ eventType: 'select', eventKeyAction: 1 })).toBeNull();
+    expect(channelStepFor(null)).toBeNull();
+  });
+
+  it('a physical UP (key-up only, as the TV sends it) zaps; before the fix this event was dropped', async () => {
+    const tree = await mount(1);
+    await keyRaw('up', KEY_UP);
+    await wait(COMMIT);
+    expect(playing(tree)).toBe(QUEUE[2].url);
+    ReactTestRenderer.act(() => tree.unmount());
+  });
+
+  it('key-down + key-up of one press (enableKeyDownEvents on) is still exactly one step', async () => {
+    const tree = await mount(1);
+    await keyRaw('down', KEY_DOWN);
+    await keyRaw('down', KEY_UP);
+    await wait(COMMIT);
+    expect(playing(tree)).toBe(QUEUE[0].url);
+    ReactTestRenderer.act(() => tree.unmount());
+  });
+
+  it('a held key (longUp: down once, up on release) is one step, not two', async () => {
+    const tree = await mount(1);
+    await keyRaw('longUp', KEY_DOWN);
+    await keyRaw('longUp', KEY_UP);
+    await wait(COMMIT);
+    expect(playing(tree)).toBe(QUEUE[2].url);
+    ReactTestRenderer.act(() => tree.unmount());
+  });
+
+  it('SeekBar LEFT/RIGHT use the same contract (they were dropped on key-up too)', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync(require.resolve('../src/features/player/SeekBar'), 'utf8');
+    expect(src).toContain('isPressCompletion(evt)');
+    expect(src).not.toMatch(/eventKeyAction === 1\) return/);
+  });
+
+  it('list closed: UP/DOWN zap; list open: UP/DOWN are list navigation only; closed again: zap again', async () => {
+    const tree = await mount(1);
+    await ReactTestRenderer.act(async () => byLabel(tree, 'قائمة القنوات').props.onPress());
+    await key('up');
+    await wait(COMMIT);
+    expect(playing(tree)).toBe(QUEUE[1].url); // open: no zap
+    await back(); // close
+    await key('up');
+    await wait(COMMIT);
+    expect(playing(tree)).toBe(QUEUE[2].url); // closed: zap
+    ReactTestRenderer.act(() => tree.unmount());
+  });
+
+  it('AMER_TV_INPUT traces event → decision → zap → tuneTo start → tuneTo complete, with no URLs', async () => {
+    const diag = captureDiag();
+    try {
+      const tree = await mount(1);
+      await key('up');
+      await wait(COMMIT);
+      const video = tree.root.findAll(n => n.props.source?.uri && typeof n.props.onLoad === 'function')[0];
+      await ReactTestRenderer.act(async () => video.props.onLoad({ duration: 0, audioTracks: [], textTracks: [], videoTracks: [] }));
+      const input = diag.of('AMER_TV_INPUT');
+      expect(input[0]).toMatchObject({ stage: 'event', eventType: 'up', eventKeyAction: 1, reachedPlayer: true, index: 1, count: 5, decision: 'zap', showControls: true });
+      expect(input.map(e => e.stage)).toEqual(['event', 'zap:pending', 'tuneTo:start', 'tuneTo:complete']);
+      expect(input[2]).toMatchObject({ source: 'remote:up', fromIndex: 1, targetIndex: 2, targetId: 'live-3' });
+      expect(diag.lines.join('\n')).not.toMatch(/http|srv\/live/);
+      ReactTestRenderer.act(() => tree.unmount());
+    } finally {
+      diag.stop();
+    }
+  });
+});
+
+describe('channel list: one live queue, rendered in the player (the empty-list bug)', () => {
+  it('is an overlay in the player tree (no Modal window), with no subview clipping', async () => {
+    const tree = await mount(2);
+    await ReactTestRenderer.act(async () => byLabel(tree, 'قائمة القنوات').props.onPress());
+    const { Modal } = jest.requireActual('react-native');
+    const panel = tree.root.findAll(n => n.props.testID === 'channel-list-panel')[0];
+    expect(panel).toBeDefined();
+    let node: any = panel;
+    while (node) {
+      expect(node.type).not.toBe(Modal);
+      node = node.parent;
+    }
+    const list = tree.root.findAll(n => Array.isArray(n.props.data) && n.props.getItemLayout)[0];
+    expect(list.props.removeClippedSubviews).toBe(false);
+    expect(list.props.data.filter((r: any) => r.kind === 'channel').length).toBe(QUEUE.length);
+    ReactTestRenderer.act(() => tree.unmount());
+  });
+
+  it('lists exactly the queue UP/DOWN zaps through, marks the zapped-to channel, and selects via tuneTo', async () => {
+    const diag = captureDiag();
+    try {
+      const tree = await mount(1);
+      await key('up'); // zap to index 2 through the remote path
+      await wait(COMMIT);
+      await key('up'); // and index 3
+      await wait(COMMIT);
+      // A zap hides the control bar (as before); bring it back like a viewer does.
+      await ReactTestRenderer.act(async () => byLabel(tree, 'إظهار عناصر التحكم').props.onPress());
+      await ReactTestRenderer.act(async () => byLabel(tree, 'قائمة القنوات').props.onPress());
+      const list = tree.root.findAll(n => Array.isArray(n.props.data) && n.props.getItemLayout)[0];
+      const channels = list.props.data.filter((r: any) => r.kind === 'channel').map((r: any) => r.channel);
+      expect(channels).toEqual(QUEUE); // same objects, same order
+      const current = tree.root.findAll(n => n.props.accessibilityState?.selected === true && n.props.accessibilityLabel)[0];
+      expect(current.props.accessibilityLabel).toBe('قناة 4');
+      await ReactTestRenderer.act(async () => byLabel(tree, 'قناة 3').props.onPress());
+      expect(playing(tree)).toBe(QUEUE[2].url);
+      const tune = diag.of('AMER_TV_INPUT').filter(e => e.stage === 'tuneTo:start');
+      expect(tune.map(e => e.source)).toEqual(['remote:up', 'remote:up', 'channel-list']);
+      const open = diag.of('AMER_TV_CHANNELS').find(e => e.stage === 'open');
+      expect(open).toMatchObject({ currentIndex: 3, queueCount: 5, firstId: 'live-1', lastId: 'live-5', firstName: 'قناة 1', lastName: 'قناة 5' });
+      const mounted = diag.of('AMER_TV_CHANNELS').find(e => e.stage === 'panel:mount');
+      expect(mounted).toMatchObject({ receivedCount: 5, rowCount: 7, currentIndex: 3 });
+      expect(diag.lines.join('\n')).not.toMatch(/http|srv\/live/);
+      ReactTestRenderer.act(() => tree.unmount());
+    } finally {
+      diag.stop();
+    }
+  });
+
+  it('an empty queue shows a real message, never a blank panel', async () => {
+    const ChannelListPanel = require('../src/features/player/ChannelListPanel').default;
+    let tree: Tree | undefined;
+    await ReactTestRenderer.act(async () => {
+      tree = ReactTestRenderer.create(
+        <AppPreferencesProvider value={prefs}>
+          <ChannelListPanel channels={[]} currentIndex={-1} ar onSelect={noop} onClose={noop} />
+        </AppPreferencesProvider>,
+      );
+    });
+    expect(tree!.root.findAll(n => n.props.testID === 'channel-list-empty').length).toBeGreaterThan(0);
+    expect(texts(tree!)).toContain('لا توجد قنوات في هذه القائمة');
+    ReactTestRenderer.act(() => tree!.unmount());
+  });
+
+  it('logs the list viewport and the rows that really became visible (what the TV reports)', async () => {
+    const diag = captureDiag();
+    try {
+      const tree = await mount(2);
+      await ReactTestRenderer.act(async () => byLabel(tree, 'قائمة القنوات').props.onPress());
+      const list = tree.root.findAll(n => Array.isArray(n.props.data) && n.props.getItemLayout)[0];
+      await ReactTestRenderer.act(async () => list.props.onLayout({ nativeEvent: { layout: { x: 0, y: 0, width: 480, height: 0 } } }));
+      await ReactTestRenderer.act(async () => list.props.onLayout({ nativeEvent: { layout: { x: 0, y: 0, width: 480, height: 620 } } }));
+      await ReactTestRenderer.act(async () => list.props.onViewableItemsChanged({ viewableItems: [{ index: 2 }, { index: 3 }, { index: 4 }], changed: [] }));
+      const stages = diag.of('AMER_TV_CHANNELS').map(e => e.stage);
+      expect(stages).toEqual(expect.arrayContaining(['open', 'panel:mount', 'panel:zero-height', 'panel:layout', 'panel:rows-visible']));
+      expect(diag.of('AMER_TV_CHANNELS').find(e => e.stage === 'panel:rows-visible')).toMatchObject({ renderedRows: 3, firstVisibleRow: 2 });
+      ReactTestRenderer.act(() => tree.unmount());
+    } finally {
+      diag.stop();
+    }
   });
 });

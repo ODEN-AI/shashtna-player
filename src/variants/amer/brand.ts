@@ -20,6 +20,8 @@ export const BRAND: Strings<typeof Base.BRAND> = {
   statement: { ar: 'قنواتك المباشرة، بكل وضوح.', en: 'Your live channels, crystal clear.' },
   // No player badge: the loading screen shows the channel's real logo, or nothing.
   playerMark: '',
+  // Android TV test build: AMER_TV_INPUT / AMER_TV_CHANNELS lines in logcat. 'off' for a public release.
+  tvDiagnostics: 'on',
   userAgent: 'AmerIPTV/1.0',
 };
 

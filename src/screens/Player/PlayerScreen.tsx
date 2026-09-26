@@ -2,6 +2,7 @@
   ComponentProps,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react';
@@ -36,6 +37,8 @@ import type { SeriesDetailsProps } from '../../features/details/SeriesDetailsScr
 import ChannelBanner, { ChannelBannerState } from '../../features/player/ChannelBanner';
 import ChannelListPanel from '../../features/player/ChannelListPanel';
 import { BRAND } from '../../design/brand';
+import { tvDiag } from '../../lib/tvDiagnostics';
+import { channelStepFor, ChannelStep, isChannelKey, isPressCompletion, RemoteEvent } from '../../lib/tvRemote';
 import { describePlaybackError } from '../../features/player/playbackErrors';
 import { createProgressStore, formatClock, ProgressStore } from '../../features/player/progressStore';
 import {
@@ -54,6 +57,8 @@ type PlayerScreenProps = {
   subtitles?: boolean;
   /** Live list the channel was opened from; enables in-player zapping. */
   liveQueue?: readonly M3UChannel[];
+  /** Where liveQueue came from (Live TV category / search / favorites), for diagnostics. */
+  liveScope?: string;
   /** Open this series episode directly (Continue Watching). */
   startEpisode?: M3UChannel | null;
   /** Skip the movie details page and start playback (Continue Watching). */
@@ -421,6 +426,8 @@ const GLYPH_ICONS: Record<string, { name: AppIconName; flip?: boolean }> = {
   '▼': { name: 'channelDown' },
   '☰': { name: 'menu' },
 };
+
+const NO_CHANNELS: readonly M3UChannel[] = [];
 
 /** Live TV controls row: a vertical focus trap on Android TV (see tvZap). */
 const ControlsRow = Platform.isTV ? TVFocusGuideView : View;
@@ -1068,6 +1075,7 @@ export default function PlayerScreen({
   channel,
   onBack,
   liveQueue,
+  liveScope,
   startEpisode = null,
   autoStart = false,
   isFavorite = false,
@@ -1292,6 +1300,21 @@ export default function PlayerScreen({
    */
   const tvZap = Platform.isTV && canZap;
 
+  /**
+   * THE live-channel state: the ordered queue the channel was opened from
+   * (Live TV's current category/search), the channel on screen and its index.
+   * D-pad UP/DOWN, CH+/CH-, the on-screen ▲/▼ buttons, «قائمة القنوات» and
+   * tuneTo all read this one object; nothing keeps a second copy.
+   */
+  const live = useMemo(() => {
+    const queue: readonly M3UChannel[] = liveQueue || NO_CHANNELS;
+    const current = zappedChannel || channel;
+    const index = queue.findIndex(item => String(item.id) === String(current.id));
+    return { queue, current, index };
+  }, [channel, liveQueue, zappedChannel]);
+  const liveRef = useRef(live);
+  liveRef.current = live;
+
   // In-player channel list («قائمة القنوات»); playback keeps running behind it.
   const [channelList, setChannelList] = useState(false);
   const channelListRef = useRef(false);
@@ -1311,6 +1334,8 @@ export default function PlayerScreen({
   // "From start" on the movie page: ignore the saved position once.
   const skipResumeRef = useRef(false);
   const zapTargetRef = useRef<number | null>(null);
+  // A tune waiting for its stream to load (diagnostics: tuneTo completed).
+  const pendingTuneRef = useRef<{ index: number; id: string; at: number } | null>(null);
   const zapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -1379,11 +1404,25 @@ export default function PlayerScreen({
     );
 
   const openChannelList = useCallback(() => {
+    const { queue, current, index } = liveRef.current;
+    tvDiag('AMER_TV_CHANNELS', {
+      stage: 'open',
+      scope: liveScope || 'unknown',
+      currentId: String(current.id),
+      currentIndex: index,
+      queueCount: queue.length,
+      firstId: queue.length ? String(queue[0].id) : null,
+      firstName: queue.length ? queue[0].name : null,
+      lastId: queue.length ? String(queue[queue.length - 1].id) : null,
+      lastName: queue.length ? queue[queue.length - 1].name : null,
+    });
     clearHideTimer();
     setFocusListButton(false);
     setMenu(null);
+    // The list takes the screen's focus; the control bar is not left under it.
+    setShowControls(false);
     setChannelList(true);
-  }, [clearHideTimer]);
+  }, [clearHideTimer, liveScope]);
 
   /** BACK or ×: back to the player, focus on «قائمة القنوات», playback untouched. */
   const closeChannelList = useCallback(() => {
@@ -1815,6 +1854,12 @@ export default function PlayerScreen({
       (
         data: VideoLoadEvent,
       ) => {
+        const tune = pendingTuneRef.current;
+        if (tune && tune.id === String(playbackChannelRef.current.id)) {
+          pendingTuneRef.current = null;
+          tvDiag('AMER_TV_INPUT', { stage: 'tuneTo:complete', targetIndex: tune.index, targetId: tune.id, ms: Date.now() - tune.at });
+        }
+
         const nextDuration =
           Number.isFinite(
             data.duration,
@@ -2158,12 +2203,22 @@ export default function PlayerScreen({
     [],
   );
 
-  /** Switches playback to queue[index] (shared by zapping and the channel list). */
+  /** Switches playback to queue[index] (the one path for zapping and the channel list). */
   const tuneTo = useCallback(
-    (index: number) => {
-      const queue = liveQueue || [];
+    (index: number, source: string) => {
+      const queue = liveRef.current.queue;
       const next = queue[index];
       if (!next) return;
+      pendingTuneRef.current = { index, id: String(next.id), at: Date.now() };
+      tvDiag('AMER_TV_INPUT', {
+        stage: 'tuneTo:start',
+        source,
+        fromIndex: liveRef.current.index,
+        targetIndex: index,
+        count: queue.length,
+        targetId: String(next.id),
+        targetName: next.name,
+      });
       suppressWakeRef.current = true;
       clearHideTimer();
       setShowControls(false);
@@ -2173,20 +2228,18 @@ export default function PlayerScreen({
       setBanner({ channel: next, number: index + 1, total: queue.length, pending: false });
       bannerTimerRef.current = setTimeout(() => setBanner(null), ZAP_BANNER_MS * 3);
     },
-    [channel, clearHideTimer, liveQueue],
+    [channel, clearHideTimer],
   );
 
   const zap =
     useCallback(
-      (delta: 1 | -1) => {
-        const queue = liveQueue || [];
+      (delta: ChannelStep, source = 'button') => {
+        const { queue, current, index: currentIndex } = liveRef.current;
 
         if (!canZap) {
           return;
         }
 
-        const current = zappedChannel || channel;
-        const currentIndex = queue.findIndex(item => item.id === current.id);
         const from = zapTargetRef.current ?? currentIndex;
 
         // Opened channel missing from the queue: enter at the matching end.
@@ -2202,6 +2255,7 @@ export default function PlayerScreen({
         if (target < 0 || target >= queue.length) {
           // No wrap-around: stay on the current channel and say why.
           const edgeIndex = Math.max(0, Math.min(queue.length - 1, from));
+          tvDiag('AMER_TV_INPUT', { stage: 'zap:edge', source, fromIndex: from, targetIndex: target, count: queue.length });
           setBanner({
             channel: queue[edgeIndex] || current,
             number: edgeIndex + 1,
@@ -2214,6 +2268,7 @@ export default function PlayerScreen({
         }
 
         zapTargetRef.current = target;
+        tvDiag('AMER_TV_INPUT', { stage: 'zap:pending', source, fromIndex: from, targetIndex: target, count: queue.length });
 
         setBanner({
           channel: queue[target],
@@ -2235,10 +2290,10 @@ export default function PlayerScreen({
             return;
           }
 
-          tuneTo(index);
+          tuneTo(index, source);
         }, ZAP_COMMIT_MS);
       },
-      [canZap, channel, liveQueue, tuneTo, zappedChannel],
+      [canZap, tuneTo],
     );
 
   /** «قائمة القنوات»: tune straight to the chosen channel (no coalescing delay). */
@@ -2252,16 +2307,14 @@ export default function PlayerScreen({
       channelListRef.current = false;
       setChannelList(false);
       setFocusListButton(false);
-      const queue = liveQueue || [];
-      const current = zappedChannel || channel;
-      if (queue[index] && String(queue[index].id) === String(current.id)) {
+      if (index === liveRef.current.index) {
         wakeControls(); // already playing: just close the list
         return;
       }
       if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
-      tuneTo(index);
+      tuneTo(index, 'channel-list');
     },
-    [channel, liveQueue, tuneTo, wakeControls, zappedChannel],
+    [tuneTo, wakeControls],
   );
 
   const showControlsRef = useRef(showControls);
@@ -2271,37 +2324,63 @@ export default function PlayerScreen({
   const tvZapRef = useRef(tvZap);
   tvZapRef.current = tvZap;
 
+  /**
+   * The one remote channel step: D-pad UP/DOWN (TV) and CH+/CH-. Same zap as
+   * the on-screen ▲/▼ buttons (450 ms coalescing, no wrap-around, edge banner).
+   */
+  const handleRemoteChannelStep = useCallback(
+    (direction: ChannelStep, source: string) => zap(direction, source),
+    [zap],
+  );
+
+  const pausedRef = useRef(paused);
+  pausedRef.current = paused;
+  const loadingRef = useRef(loading);
+  loadingRef.current = loading;
+
   useTVEventHandler(
     useCallback(
-      evt => {
-        if (!evt || evt.eventKeyAction === 1 || !canZap || menuRef.current || channelListRef.current) {
-          return;
+      (evt: RemoteEvent) => {
+        if (!evt) return;
+        const type = evt.eventType || '';
+        const vertical = /^(long)?(up|down|Up|Down)$/.test(type) || isChannelKey(evt);
+        const step = channelStepFor(evt);
+
+        // Android delivers D-pad/CH keys on key-up (eventKeyAction 1); see lib/tvRemote.ts.
+        let decision: string;
+        if (step === null) decision = isPressCompletion(evt) ? 'ignored:not-a-channel-key' : 'ignored:key-down-half';
+        else if (!canZap) decision = 'ignored:no-live-queue';
+        else if (menuRef.current) decision = 'ignored:menu-open';
+        else if (channelListRef.current) decision = 'ignored:channel-list-open';
+        // TV: UP/DOWN always zap (the control row cannot move focus vertically).
+        // Phones/tablets with a D-pad: only while the controls are hidden.
+        else if (isChannelKey(evt) || tvZapRef.current || !showControlsRef.current) decision = 'zap';
+        else decision = 'ignored:controls-own-arrows';
+
+        if (vertical) {
+          tvDiag('AMER_TV_INPUT', {
+            stage: 'event',
+            eventType: type,
+            eventKeyAction: evt.eventKeyAction,
+            reachedPlayer: true,
+            isTV: Platform.isTV,
+            tvZap: tvZapRef.current,
+            paused: pausedRef.current,
+            loading: loadingRef.current,
+            showControls: showControlsRef.current,
+            listOpen: channelListRef.current,
+            focusTag: evt.tag ?? evt.target ?? null,
+            index: liveRef.current.index,
+            count: liveRef.current.queue.length,
+            decision,
+          });
         }
 
-        // Dedicated channel keys always zap (CH+ = next, CH- = previous).
-        if (evt.eventType === 'channelUp' || evt.eventType === 'channelDown') {
-          zap(evt.eventType === 'channelUp' ? 1 : -1);
-          return;
-        }
-
-        if (evt.eventType !== 'up' && evt.eventType !== 'down') {
-          return;
-        }
-
-        // TV / TV box: UP = next channel, DOWN = previous, straight away, whether
-        // or not the control bar is showing (its focus cannot move vertically).
-        if (tvZapRef.current) {
-          zap(evt.eventType === 'up' ? 1 : -1);
-          return;
-        }
-
-        // Other devices with a D-pad: only while the control panel is hidden, so
-        // arrows still move focus between visible controls.
-        if (!showControlsRef.current) {
-          zap(evt.eventType === 'up' ? 1 : -1);
+        if (decision === 'zap' && step !== null) {
+          handleRemoteChannelStep(step, `remote:${type}`);
         }
       },
-      [canZap, zap],
+      [canZap, handleRemoteChannelStep],
     ),
   );
 
@@ -2966,8 +3045,8 @@ export default function PlayerScreen({
 
       {channelList && canZap ? (
         <ChannelListPanel
-          channels={liveQueue || []}
-          currentId={String(playbackChannel.id)}
+          channels={live.queue}
+          currentIndex={live.index}
           ar={ar}
           onSelect={selectFromList}
           onClose={closeChannelList}

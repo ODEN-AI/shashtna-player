@@ -19,6 +19,8 @@ export const BRAND = {
   statement: { ar: 'كل ما تحب، على شاشة واحدة.', en: 'Everything you love, on one screen.' },
   /** Badge in the player while a channel opens; '' = none (show the channel's own logo). */
   playerMark: 'ش',
+  /** Real-device TV diagnostics (src/lib/tvDiagnostics.ts): 'on' | 'off'. */
+  tvDiagnostics: 'off',
   /** User-Agent sent to IPTV servers. */
   userAgent: 'ShashtnaPlayer/1.0',
 } as const;

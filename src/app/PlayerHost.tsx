@@ -8,6 +8,8 @@ import PlayerScreen, { PlayerDetailScreens } from '../screens/Player/PlayerScree
 export type PlayerLaunchOptions = {
   /** Live list the channel was picked from (enables in-player zapping). */
   liveQueue?: readonly M3UChannel[];
+  /** Category/filter the live queue came from (diagnostics only). */
+  liveScope?: string;
   /** Series episode to open directly (Continue Watching). */
   startEpisode?: M3UChannel | null;
   /** Start a movie without its details page (Continue Watching). */
@@ -42,6 +44,7 @@ export default function PlayerHost({
       autoplay={autoplay}
       subtitles={subtitles}
       liveQueue={options.liveQueue}
+      liveScope={options.liveScope}
       startEpisode={options.startEpisode}
       autoStart={options.autoStart}
       isFavorite={isFavorite}

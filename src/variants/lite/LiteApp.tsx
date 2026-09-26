@@ -124,9 +124,9 @@ function LiteContent() {
   const closePlayer = useCallback(() => setSelectedChannel(null), []);
   useBackNavigation({ playerOpen: !!selectedChannel, closePlayer, page, startPage: START_PAGE, goTo: navigate });
 
-  const openChannel = useCallback((channel: M3UChannel, queue?: readonly M3UChannel[]) => {
+  const openChannel = useCallback((channel: M3UChannel, queue?: readonly M3UChannel[], scope?: string) => {
     if (!channel.url) return;
-    setPlayerOptions({ liveQueue: queue });
+    setPlayerOptions({ liveQueue: queue, liveScope: scope });
     setSelectedChannel(channel);
   }, []);
 

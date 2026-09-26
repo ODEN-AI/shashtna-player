@@ -33,6 +33,8 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0.0"
+        // Real-device diagnostics (AMER_TV_PICKER logcat lines); only the Amer TV test build turns them on.
+        buildConfigField "boolean", "TV_DIAGNOSTICS", "false"
 
         externalNativeBuild {
             cmake {
@@ -95,6 +97,8 @@ android {
             applicationId "com.ameriptv.player"
             versionNameSuffix "-amer"
             buildConfigField "String", "JS_MAIN_MODULE", '"index.amer"'
+            // Android TV test build: on unless built with -PtvDiagnostics=false.
+            buildConfigField "boolean", "TV_DIAGNOSTICS", (project.findProperty("tvDiagnostics") ?: "true").toString()
         }
     }
 

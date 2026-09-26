@@ -15,6 +15,7 @@ import { Text } from '../../components/common/Typography';
 import { SHASHTNA_THEME } from '../../design/theme';
 import { usePalette } from '../../design/palette';
 import { formatClock, ProgressStore, useProgress } from './progressStore';
+import { isPressCompletion } from '../../lib/tvRemote';
 
 type Props = {
   store: ProgressStore;
@@ -108,7 +109,8 @@ function SeekBar({ store, duration, onSeek, onActivity, onScrubbingChange, acces
   useTVEventHandler(
     useCallback(
       evt => {
-        if (!focusedRef.current || !evt || evt.eventKeyAction === 1) return;
+        // One step per physical press: Android sends D-pad keys on key-up (lib/tvRemote.ts).
+        if (!focusedRef.current || !isPressCompletion(evt)) return;
         const forward = evt.eventType === 'right' || evt.eventType === 'longRight';
         const backward = evt.eventType === 'left' || evt.eventType === 'longLeft';
         if (!forward && !backward) return;
