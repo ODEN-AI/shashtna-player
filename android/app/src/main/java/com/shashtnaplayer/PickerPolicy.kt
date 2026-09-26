@@ -5,40 +5,38 @@ package com.shashtnaplayer
  * types): PlaylistPickerModule gathers the facts, this decides, so every rule
  * is unit-testable.
  *
- * History (both from real TVs):
+ * History (all from real TVs):
  * 1. 11ef8ea/26e4c26 launched the first non-stub handler of a wildcard-MIME
- *    GET_CONTENT query, and a TV box started a factory/media test app.
- * 2. c3fd46d classified by capability, but a TV box WITH a working system file
- *    manager got E_NO_PICKER. From the source, that policy dropped a legitimate
- *    OEM file manager in any of these ways (the device log says which):
- *    a. discovery only saw filters declaring BOTH CATEGORY_OPENABLE and
- *       CATEGORY_DEFAULT (MATCH_DEFAULT_ONLY + an OPENABLE query), so a file
- *       manager whose GET_CONTENT filter lacks OPENABLE was never a candidate;
- *    b. a preinstalled app needed a DocumentsProvider or a folder VIEW filter,
- *       which OEM file managers often do not have ("preinstalled app with no
- *       document capability");
- *    c. launcher/settings/media category were judged per PACKAGE, so a file
- *       manager shipped inside the OEM launcher or media-center package was
- *       rejected with it;
- *    d. the joined-word check matched "diag" inside ordinary words
- *       ("mediagallery", "mediaguide").
+ *    GET_CONTENT query: a TV box started a factory/media test app.
+ * 2. c3fd46d: a TV WITH a system file manager got E_NO_PICKER (discovery needed
+ *    OPENABLE+DEFAULT; package-level launcher/settings/media rejection; system
+ *    apps needed a DocumentsProvider or folder VIEW; "diag" inside words).
+ * 3. 95ead3f fixed those, but put system and user-installed managers in ONE
+ *    tier (FILE_MANAGER) ranked by score. Third-party managers usually export a
+ *    DocumentsProvider (+40) and folder VIEW (+30), so they out-scored the OEM
+ *    explorer (storage access +20): the TV opened a third-party manager.
  *
- * Now:
- * - discovery covers OPEN_DOCUMENT / GET_CONTENT with and without OPENABLE and
- *   several playlist MIME types (PlaylistPickerModule), and records what each
- *   activity really declares;
- * - hard rejections are about identity and safety, judged per ACTIVITY: this
- *   app, framework stubs, the home-screen / settings activity itself, device
- *   test/diagnostic names, device-control permissions (reboot, recovery,
- *   factory reset, hardware test...), media-only filters, no generic type;
- * - a candidate is a file picker when it holds the system document permission
- *   (DocumentsUI) or shows file capability: DocumentsProvider, folder
- *   browsing, storage access permission, or storage-mount handling;
- * - accepted candidates are ranked by a deterministic score, and launched
- *   pinned to their exact activity with the intent form that matched.
- *
- * Tiers: DOCUMENTS_UI > FILE_MANAGER > GENERIC_CONTENT (user-installed app
- * offering documents, no file signals); nothing accepted = E_NO_PICKER.
+ * Requirement now: open the device's own (system/OEM) file explorer.
+ * - Origin is a hard gate, not a score: only system apps (FLAG_SYSTEM) and
+ *   updated system apps (FLAG_UPDATED_SYSTEM_APP) can be launched. A
+ *   user-installed app is classified (USER_INSTALLED, logged) but never
+ *   launched, however capable it is.
+ * - Being a system app proves nothing by itself: the same identity/safety
+ *   rejections apply (stubs, the home/settings activity itself, diagnostic
+ *   names, device-control permissions, media-only filters, media apps without
+ *   file capability), and a system app must show file-picker capability.
+ * - Tiers, deterministic (then score, OPEN_DOCUMENT first, then names):
+ *     OEM_FILE_EXPLORER  system app, not DocumentsUI, that the user can open from
+ *                        the app list (launchable) or that browses folders /
+ *                        ships a DocumentsProvider, and answers OPEN_DOCUMENT or
+ *                        GET_CONTENT for generic documents;
+ *     DOCUMENTS_UI       Android's document picker (MANAGE_DOCUMENTS);
+ *     SYSTEM_PICKER      other system picker with file signals (storage access /
+ *                        storage mounts) but no user-facing explorer;
+ *   On a TV the OEM explorer comes first (the requirement); on phones and
+ *   tablets DocumentsUI stays first, as before.
+ * - Nothing launchable: E_NO_PICKER (the Arabic "cannot open the file manager"
+ *   message), never a third-party app.
  */
 internal object PickerPolicy {
   /** Register for picker intents on Android TV but cannot pick a file. */
@@ -52,7 +50,15 @@ internal object PickerPolicy {
   /** ApplicationInfo.category, as far as the policy cares. */
   enum class AppCategory { UNDEFINED, PRODUCTIVITY, AUDIO, VIDEO, IMAGE, GAME, SOCIAL, NEWS, MAPS, OTHER }
 
-  enum class Kind { DOCUMENTS_UI, FILE_MANAGER, GENERIC_CONTENT, REJECTED }
+  enum class Kind {
+    OEM_FILE_EXPLORER,
+    DOCUMENTS_UI,
+    SYSTEM_PICKER,
+
+    /** A working picker from a user-installed app: logged, never launched (system/OEM picker required). */
+    USER_INSTALLED,
+    REJECTED,
+  }
 
   /** What the device reports about one activity that answered a picker intent. */
   data class Candidate(
@@ -63,7 +69,12 @@ internal object PickerPolicy {
     val declaredTypes: List<String>?,
     /** Its picker filter includes CATEGORY_OPENABLE (launched with it; otherwise without). */
     val openable: Boolean = true,
+    /** ApplicationInfo.FLAG_SYSTEM: preinstalled in the firmware. */
     val isSystemApp: Boolean = false,
+    /** ApplicationInfo.FLAG_UPDATED_SYSTEM_APP: a firmware app updated since (still the OEM's app). */
+    val isUpdatedSystemApp: Boolean = false,
+    /** The package has an app-list entry (LAUNCHER / LEANBACK_LAUNCHER): a user-facing app. */
+    val isLaunchable: Boolean = false,
     /** android.permission.MANAGE_DOCUMENTS is granted to the package (system DocumentsUI). */
     val holdsManageDocuments: Boolean = false,
     /** The package has a provider protected by MANAGE_DOCUMENTS, i.e. a DocumentsProvider. */
@@ -147,19 +158,24 @@ internal object PickerPolicy {
    */
   private val DIAGNOSTIC_PARTS = listOf("factory", "devicetest", "hwtest", "hwdiag", "diagnos", "agingtest", "burnin")
 
-  private val TIER = mapOf(Kind.DOCUMENTS_UI to 0, Kind.FILE_MANAGER to 1, Kind.GENERIC_CONTENT to 2)
+  /** Launch order of the accepted kinds: TV (OEM explorer first) and phone/tablet (DocumentsUI first, as before). */
+  private val TV_ORDER = listOf(Kind.OEM_FILE_EXPLORER, Kind.DOCUMENTS_UI, Kind.SYSTEM_PICKER)
+  private val PHONE_ORDER = listOf(Kind.DOCUMENTS_UI, Kind.OEM_FILE_EXPLORER, Kind.SYSTEM_PICKER)
 
-  fun decide(candidates: List<Candidate>, ownPackage: String): Decision {
+  fun isSystemOrigin(c: Candidate) = c.isSystemApp || c.isUpdatedSystemApp
+
+  fun decide(candidates: List<Candidate>, ownPackage: String, television: Boolean = true): Decision {
     val seen = HashSet<String>()
     val verdicts = candidates
       .filter { seen.add("${it.action}|${it.packageName}|${it.activityName}") }
       .map { classify(it, ownPackage) }
+    val order = if (television) TV_ORDER else PHONE_ORDER
     val launches = verdicts
-      .filter { it.kind != Kind.REJECTED }
+      .filter { it.kind in order }
       // Deterministic: tier, then score (high first), then OPEN_DOCUMENT before
       // GET_CONTENT (persistable grant), then names.
       .sortedWith(
-        compareBy<Verdict>({ TIER.getValue(it.kind) }, { -it.score }, { it.candidate.action.ordinal })
+        compareBy<Verdict>({ order.indexOf(it.kind) }, { -it.score }, { it.candidate.action.ordinal })
           .thenBy { it.candidate.packageName }
           .thenBy { it.candidate.activityName },
       )
@@ -187,8 +203,8 @@ internal object PickerPolicy {
     }
 
     val types = c.declaredTypes?.map(::normalizeType)
-    if (c.action == Action.OPEN_DOCUMENT && c.holdsManageDocuments && (types == null || types.any { it in GENERIC_TYPES })) {
-      return Verdict(c, Kind.DOCUMENTS_UI, "system document picker (MANAGE_DOCUMENTS)", 100)
+    if (c.holdsManageDocuments && isSystemOrigin(c) && (types == null || types.any { it in GENERIC_TYPES })) {
+      return Verdict(c, Kind.DOCUMENTS_UI, "Android document picker (MANAGE_DOCUMENTS)", if (c.action == Action.OPEN_DOCUMENT) 100 else 90)
     }
     if (types == null) return reject("filter unknown (cannot prove it offers documents)")
     if (types.isNotEmpty() && types.all(::isMediaType)) return reject("media types only (${types.joinToString()})")
@@ -215,13 +231,21 @@ internal object PickerPolicy {
     if (c.category in MEDIA_CATEGORIES) score -= 30
     if (c.packageHasHome) score -= 10
     if (c.packageHasSettings) score -= 10
+    if (c.isLaunchable) score += 10
 
-    if (evidence.isNotEmpty()) {
-      val origin = if (c.isSystemApp) "system file manager" else "file manager"
-      return Verdict(c, Kind.FILE_MANAGER, "$origin (${evidence.joinToString()})", score)
+    if (!isSystemOrigin(c)) {
+      val what = if (evidence.isNotEmpty()) "file manager (${evidence.joinToString()})" else "app offering documents"
+      return Verdict(c, Kind.USER_INSTALLED, "user-installed $what: not used, system/OEM picker required", score)
     }
-    if (!c.isSystemApp) return Verdict(c, Kind.GENERIC_CONTENT, "user-installed app offering documents (fallback)", score)
-    return reject("preinstalled app with no file capability (no DocumentsProvider, folders, storage access or mounts)")
+    val origin = if (c.isUpdatedSystemApp) "updated system app" else "system app"
+    if (strong || (c.isLaunchable && evidence.isNotEmpty())) {
+      val how = (evidence + if (c.isLaunchable) listOf("in the app list") else emptyList()).joinToString()
+      return Verdict(c, Kind.OEM_FILE_EXPLORER, "OEM file explorer, $origin ($how)", score)
+    }
+    if (evidence.isNotEmpty()) {
+      return Verdict(c, Kind.SYSTEM_PICKER, "system picker, $origin (${evidence.joinToString()}), not a user-facing explorer", score)
+    }
+    return reject("$origin with no file capability (no DocumentsProvider, folders, storage access or mounts)")
   }
 
   /** IntentFilter keeps wildcard types without the subtype: "*" and "audio" become full wildcard types. */

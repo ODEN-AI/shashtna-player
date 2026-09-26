@@ -1,11 +1,14 @@
 package com.shashtnaplayer
 
 import android.app.Activity
+import android.app.UiModeManager
 import android.content.ActivityNotFoundException
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.content.pm.ResolveInfo
+import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
@@ -160,7 +163,9 @@ class PlaylistPickerModule(private val context: ReactApplicationContext) : React
         try {
           val found = candidates()
           logInventory(found)
-          PickerPolicy.decide(found, context.packageName)
+          val television = isTelevision()
+          diag("device television=$television sdk=${Build.VERSION.SDK_INT}")
+          PickerPolicy.decide(found, context.packageName, television)
         } catch (error: Exception) {
           diag("candidates failed error=${error.javaClass.simpleName}")
           PickerPolicy.Decision(emptyList(), emptyList())
@@ -190,12 +195,22 @@ class PlaylistPickerModule(private val context: ReactApplicationContext) : React
     // decided by capability (PickerPolicy), not by this wildcard.
     for (verdict in decision.verdicts) {
       val c = verdict.candidate
-      diag("candidate action=${c.action} activity=${c.packageName}/${c.activityName} kind=${verdict.kind} score=${verdict.score}" +
-        " reason=${verdict.reason} types=${c.declaredTypes} openable=${c.openable} system=${c.isSystemApp}" +
-        " manageDocuments=${c.holdsManageDocuments} documentsProvider=${c.exportsDocumentsProvider} folders=${c.browsesFolders}" +
-        " storage=${c.requestsStorageAccess} mounts=${c.watchesStorageMounts} control=${c.deviceControlPermissions.size}" +
-        " home=${c.isHomeLauncher}/${c.packageHasHome} settings=${c.isSettingsApp}/${c.packageHasSettings} category=${c.category}")
+      val answers = decision.verdicts.filter { it.candidate.packageName == c.packageName }.map { it.candidate.action }.toSet()
+      diag(
+        "candidate package=${c.packageName} activity=${c.activityName} action=${c.action}" +
+          " system=${yn(c.isSystemApp)} updatedSystem=${yn(c.isUpdatedSystemApp)} userInstalled=${yn(!PickerPolicy.isSystemOrigin(c))}" +
+          " launchable=${yn(c.isLaunchable)} openDocument=${yn(PickerPolicy.Action.OPEN_DOCUMENT in answers)}" +
+          " getContent=${yn(PickerPolicy.Action.GET_CONTENT in answers)} openable=${yn(c.openable)}" +
+          " documentsProvider=${yn(c.exportsDocumentsProvider)} manageDocuments=${yn(c.holdsManageDocuments)} folders=${yn(c.browsesFolders)}" +
+          " storage=${yn(c.requestsStorageAccess)} mounts=${yn(c.watchesStorageMounts)} control=${c.deviceControlPermissions.size}" +
+          " home=${c.isHomeLauncher}/${c.packageHasHome} settings=${c.isSettingsApp}/${c.packageHasSettings} category=${c.category}" +
+          " types=${c.declaredTypes} contentUri=unknown-until-result" +
+          " score=${verdict.score} ${if (verdict.kind in ACCEPTED) "ACCEPTED" else "REJECTED"} kind=${verdict.kind} reason=${verdict.reason}",
+      )
     }
+    val oem = decision.launches.firstOrNull { it.kind == PickerPolicy.Kind.OEM_FILE_EXPLORER }
+    diag("summary oemFileExplorer=${oem?.let { "${it.packageName}/${it.activityName}" } ?: "none"} accepted=${decision.launches.size}" +
+      " userInstalledSkipped=${decision.verdicts.count { it.kind == PickerPolicy.Kind.USER_INSTALLED }}")
     pending = promise
     launchId += 1
     launchedAt = SystemClock.elapsedRealtime()
@@ -294,6 +309,8 @@ class PlaylistPickerModule(private val context: ReactApplicationContext) : React
         declaredTypes = if (f.typesKnown) f.types.toList() else null,
         openable = f.openable,
         isSystemApp = p.system,
+        isUpdatedSystemApp = p.updated,
+        isLaunchable = p.launchable,
         holdsManageDocuments = p.manageDocuments,
         exportsDocumentsProvider = p.documentsProvider,
         browsesFolders = p.folders,
@@ -311,6 +328,8 @@ class PlaylistPickerModule(private val context: ReactApplicationContext) : React
 
   private class PackageFacts(
     val system: Boolean,
+    val updated: Boolean,
+    val launchable: Boolean,
     val manageDocuments: Boolean,
     val documentsProvider: Boolean,
     val folders: Boolean,
@@ -336,7 +355,11 @@ class PlaylistPickerModule(private val context: ReactApplicationContext) : React
         false
       }
     val flags = app?.flags ?: 0
-    val system = (flags and (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP)) != 0
+    val system = (flags and ApplicationInfo.FLAG_SYSTEM) != 0
+    val updated = (flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+    val launchable =
+      activities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)).isNotEmpty() ||
+        activities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER)).isNotEmpty()
     val manageDocuments =
       try {
         pm.checkPermission(MANAGE_DOCUMENTS, pkg) == PackageManager.PERMISSION_GRANTED
@@ -381,7 +404,7 @@ class PlaylistPickerModule(private val context: ReactApplicationContext) : React
       } else {
         PickerPolicy.AppCategory.UNDEFINED
       }
-    return PackageFacts(system, manageDocuments, documentsProvider, folders, storage, mounts, control, home, settings, category)
+    return PackageFacts(system, updated, launchable, manageDocuments, documentsProvider, folders, storage, mounts, control, home, settings, category)
   }
 
   /**
@@ -419,9 +442,31 @@ class PlaylistPickerModule(private val context: ReactApplicationContext) : React
       val f = facts.getOrPut(pkg) { packageFacts(pm, pkg, info.activityInfo.applicationInfo) }
       if (!(f.documentsProvider || f.folders || f.storage || f.mounts)) continue
       val label = try { info.loadLabel(pm).toString() } catch (_: Exception) { "?" }
-      diag("inventory app=$component label=\"$label\" system=${f.system} documentsProvider=${f.documentsProvider}" +
-        " folders=${f.folders} storage=${f.storage} mounts=${f.mounts} control=${f.control.size} pickerIntents=${pkg in pickers}")
+      fun answers(intent: Intent) =
+        try {
+          pm.queryIntentActivities(intent.setPackage(pkg), 0).isNotEmpty()
+        } catch (_: Exception) {
+          false
+        }
+      val openDocument = answers(Intent(Intent.ACTION_OPEN_DOCUMENT).setType(PICK_MIME))
+      val getContent = answers(Intent(Intent.ACTION_GET_CONTENT).setType(PICK_MIME))
+      // ACTION_PICK is not launched (it can return a file:// path this app has no permission to read);
+      // it is reported so a TV whose explorer only offers PICK can be recognised from the log.
+      val pick = answers(Intent(Intent.ACTION_PICK).setType(PICK_MIME)) || answers(Intent(Intent.ACTION_PICK, Uri.parse("file:///storage")))
+      diag("inventory app=$component label=\"$label\" system=${yn(f.system)} updatedSystem=${yn(f.updated)} userInstalled=${yn(!f.system && !f.updated)}" +
+        " documentsProvider=${yn(f.documentsProvider)} folders=${yn(f.folders)} storage=${yn(f.storage)} mounts=${yn(f.mounts)} control=${f.control.size}" +
+        " openDocument=${yn(openDocument)} getContent=${yn(getContent)} pick=${yn(pick)} pickerCandidate=${yn(pkg in pickers)}")
     }
+  }
+
+  private fun yn(value: Boolean) = if (value) "yes" else "no"
+
+  /** Android TV / TV box: the OEM file explorer is preferred there (PickerPolicy). */
+  private fun isTelevision(): Boolean {
+    val uiMode = context.getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
+    if (uiMode?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION) return true
+    val pm = context.packageManager
+    return pm.hasSystemFeature(PackageManager.FEATURE_LEANBACK) || pm.hasSystemFeature("android.software.leanback_only")
   }
 
   /** AMER_TV_PICKER lines (adb logcat -s AMER_TV_PICKER): package/activity names and decisions only. */
@@ -569,6 +614,7 @@ class PlaylistPickerModule(private val context: ReactApplicationContext) : React
     private const val DIAG_TAG = "AMER_TV_PICKER"
     private const val PICK_MIME = "*/*"
     private const val MANAGE_DOCUMENTS = "android.permission.MANAGE_DOCUMENTS"
+    private val ACCEPTED = setOf(PickerPolicy.Kind.OEM_FILE_EXPLORER, PickerPolicy.Kind.DOCUMENTS_UI, PickerPolicy.Kind.SYSTEM_PICKER)
     private const val DOCUMENTS_PROVIDER_ACTION = "android.content.action.DOCUMENTS_PROVIDER"
 
     /** Discovery MIME types: the wildcard plus what .m3u / .m3u8 / text files are labelled as. */

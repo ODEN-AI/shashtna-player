@@ -43,7 +43,7 @@ describe('native picker audit', () => {
   });
 
   it('package-manager queries run off the UI thread; picker state stays on it', () => {
-    expect(moduleSrc).toMatch(/io\.execute \{[\s\S]*?val found = candidates\(\)[\s\S]*?PickerPolicy\.decide\(found, context\.packageName\)[\s\S]*?UiThreadUtil\.runOnUiThread \{ launchPicker\(promise, decision\) \}/);
+    expect(moduleSrc).toMatch(/io\.execute \{[\s\S]*?val found = candidates\(\)[\s\S]*?PickerPolicy\.decide\(found, context\.packageName, television\)[\s\S]*?UiThreadUtil\.runOnUiThread \{ launchPicker\(promise, decision\) \}/);
   });
 
   it('discovery also finds OEM file managers without OPENABLE / DEFAULT, from a fixed set of queries', () => {
@@ -64,6 +64,25 @@ describe('native picker audit', () => {
   it('the launched MIME stays the wildcard (a text/plain launch would hide .m3u = audio/x-mpegurl)', () => {
     expect(moduleSrc).toContain('private const val PICK_MIME = "*/*"');
     expect(moduleSrc).toMatch(/private fun pickerIntent\(action: PickerPolicy\.Action, openable: Boolean = true, mime: String = PICK_MIME\)/);
+  });
+
+  it('only system/OEM kinds are ever launched; user-installed apps are logged, not opened', () => {
+    // The launch list is built from the tier order, which contains no USER_INSTALLED / REJECTED.
+    expect(policySrc).toContain('private val TV_ORDER = listOf(Kind.OEM_FILE_EXPLORER, Kind.DOCUMENTS_UI, Kind.SYSTEM_PICKER)');
+    expect(policySrc).toContain('private val PHONE_ORDER = listOf(Kind.DOCUMENTS_UI, Kind.OEM_FILE_EXPLORER, Kind.SYSTEM_PICKER)');
+    expect(policySrc).toMatch(/\.filter \{ it\.kind in order \}/);
+    expect(policySrc).toContain('fun isSystemOrigin(c: Candidate) = c.isSystemApp || c.isUpdatedSystemApp');
+    // TV vs phone is decided on the device.
+    expect(moduleSrc).toContain('Configuration.UI_MODE_TYPE_TELEVISION');
+    expect(moduleSrc).toContain('PackageManager.FEATURE_LEANBACK');
+  });
+
+  it('each candidate line carries origin, actions, OPENABLE, provider, score and verdict', () => {
+    for (const field of ['system=', 'updatedSystem=', 'userInstalled=', 'openDocument=', 'getContent=', 'openable=', 'documentsProvider=', 'contentUri=', 'score=', 'kind=', 'reason=']) {
+      expect(moduleSrc).toContain(field);
+    }
+    expect(moduleSrc).toContain('diag("summary oemFileExplorer=');
+    expect(moduleSrc).toContain('pick=${yn(pick)}');
   });
 
   it('the device inventory runs only in the diagnostics build', () => {

@@ -94,10 +94,22 @@ How to read the result:
 
 On the sign-in screen, choose the file tab and press the button.
 
-Expected: one of these, never a device test, factory or media app:
-- the system document picker;
-- the TV's own file manager;
-- the Arabic message «تعذر فتح مدير الملفات على هذا الجهاز».
+**Acceptance condition:** the TV's ORIGINAL system/OEM file explorer opens.
+
+It must NOT be:
+- a third-party / user-installed file manager (these are never launched in this build);
+- a media manager, gallery or player;
+- a factory or diagnostic app.
+
+If the device has no usable system picker, the Arabic message «تعذر فتح مدير الملفات على هذا الجهاز» is correct.
+
+How the picker is chosen:
+- Only system (`FLAG_SYSTEM`) and updated-system (`FLAG_UPDATED_SYSTEM_APP`) apps can be launched.
+- On a TV the order is:
+  1. OEM file explorer (system, in the app list or browsing folders / shipping a DocumentsProvider, answers OPEN_DOCUMENT or GET_CONTENT);
+  2. Android DocumentsUI;
+  3. another system picker.
+- Phones and tablets keep DocumentsUI first.
 
 ### 3a. Collect the evidence (only package/activity names, filters and permissions: no credentials, URLs or file contents)
 
@@ -114,9 +126,10 @@ adb logcat -s AMER_TV_PICKER:V ReactNativeJS:V > picker.log     (press «إضا�
 |---|---|
 | `request ...` | What was asked: actions, discovery types, launch MIME |
 | `discovered action=... activity=pkg/Activity matched=[...] declared=[...] openable=...` | Does OPEN_DOCUMENT / GET_CONTENT resolve at all, and to which activity? Which MIME queries matched, what the filter declares, does it take CATEGORY_OPENABLE? |
-| `candidate ... kind=... score=... reason=... storage= mounts= documentsProvider= folders= control= home=a/b settings=a/b category=` | Why each one was accepted or rejected |
+| `candidate package=... activity=... system=yes/no updatedSystem=yes/no userInstalled=yes/no launchable= openDocument= getContent= openable= documentsProvider= ... score=... ACCEPTED/REJECTED kind=... reason=...` | Every candidate: origin, capabilities, score and the exact reason |
+| `summary oemFileExplorer=pkg/Activity accepted=N userInstalledSkipped=M` | **The answer to "which activity is this TV's original file explorer?"** (or `none`) |
 | `inventory documentsProvider package=... authority=...` | Which DocumentsProviders exist |
-| `inventory app=pkg/Activity label="..." ... pickerIntents=true/false` | Launchable apps with file signals (the TV's file manager should be here), and whether they answer a picker intent at all |
+| `inventory app=pkg/Activity label="..." system= updatedSystem= userInstalled= ... openDocument= getContent= pick= pickerCandidate=` | Launchable apps with file signals (the TV's own explorer should be here), and which file intents they answer |
 | `selected ...` or `selected none: E_NO_PICKER` | The final decision |
 | `result resultCode=.. document=.. scheme=content/file` | What the picker returned (only the scheme, never the URI) |
 | `AMER_TV_PICKER {"stage":"js:result","code":"E_NO_PICKER"}` (ReactNativeJS) | The exact code behind the Arabic message: E_NO_PICKER, E_PICKER_FAILED, E_PICK_FAILED, PICKED or CANCELLED |
@@ -146,10 +159,11 @@ It should open in a "choose a file" mode. Without `-c ...OPENABLE`, try again if
 
 | What the log shows | Meaning |
 |---|---|
-| The file manager is `discovered` and `kind=FILE_MANAGER` / `selected` | Fixed on this TV. Pick an `.m3u` and check `result ... scheme=content` (or `file`), then the channels load. |
-| It is `discovered` but `kind=REJECTED` | The `reason=` names the exact rule. Send that line: it is a policy decision to review, not a guess. |
-| It is only in `inventory ... pickerIntents=false` | It does not declare GET_CONTENT / OPEN_DOCUMENT at all, so no app can receive a file from it. The fix is then a different feature: the file manager "opens" the .m3u with عامر IPTV (an ACTION_VIEW import), decided from this evidence. |
-| Nothing about it anywhere | Send `file-manager.txt` and the `query-activities` output. |
+| `summary oemFileExplorer=<pkg/Activity>` and `selected ... kind=OEM_FILE_EXPLORER`, and the TV's own explorer opens | Accepted on this TV. Pick an `.m3u`, check `result ... scheme=content` and that the channels load. |
+| The TV's explorer is a `candidate` with `REJECTED` | Its `reason=` names the exact rule. Send that line. |
+| It is only in `inventory` with `openDocument=no getContent=no pick=yes` | It offers only ACTION_PICK. That usually returns a file path the app is not allowed to read (no storage permission), so it is not launched and the result is E_NO_PICKER. Supporting it means adding a storage permission and a path reader: a decision to make from this log. |
+| It is only in `inventory` with `openDocument=no getContent=no pick=no` | It exposes no file-selection intent at all. No app can receive a file from it, so E_NO_PICKER is the correct result. |
+| A third-party manager shows as `kind=USER_INSTALLED` | Expected: it is logged but never opened. |
 
 Also check:
 - Cancel, then press the button again: a picker must open again.
