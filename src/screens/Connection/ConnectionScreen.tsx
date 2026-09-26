@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -188,17 +189,36 @@ export default function ConnectionScreen({ onConnected, edition, initialMethod, 
     }
   };
 
+  const fileFieldRef = useRef<View>(null);
+  const picking = useRef(false);
+  /**
+   * Android TV: coming back from the system picker (or a device that has none)
+   * can leave no view focused, and a remote cannot tap. Put the focus back on
+   * the file field. Phones and tablets are left alone.
+   */
+  const refocusFileField = () => {
+    if (!Platform.isTV) return;
+    requestAnimationFrame(() => (fileFieldRef.current as unknown as { requestTVFocus?: () => void } | null)?.requestTVFocus?.());
+  };
+
   /** Opens the system picker; the file is loaded when the user signs in. */
   const pickFile = async () => {
+    // One picker at a time, and none while a source is loading.
+    if (loading || picking.current) return;
+    picking.current = true;
     setError(null);
     try {
       const picked = await pickPlaylistFile();
+      refocusFileField();
       if (!picked) return; // cancelled
       setPickedFile(picked);
       // عامر IPTV: the picked file is loaded at once (no separate Sign in).
       if (edition.importFileOnPick) await connect(picked);
     } catch (e) {
       setError(describeConnectionError(e, ar));
+      refocusFileField();
+    } finally {
+      picking.current = false;
     }
   };
 
@@ -331,6 +351,7 @@ export default function ConnectionScreen({ onConnected, edition, initialMethod, 
 
       {method === 'file' ? (
         <FilePickerField
+          fieldRef={fileFieldRef}
           file={pickedFile}
           disabled={loading}
           onPick={pickFile}
@@ -382,9 +403,13 @@ export default function ConnectionScreen({ onConnected, edition, initialMethod, 
 
       <Pressable
         focusable
-        disabled={loading}
+        // Stays focusable while loading (a disabled, focused control leaves a TV
+        // remote with nothing to act on); presses are ignored instead.
         accessibilityRole="button"
-        onPress={() => connect()}
+        accessibilityState={{ disabled: loading, busy: loading }}
+        onPress={() => {
+          if (!loading) connect();
+        }}
         style={({ focused, pressed }) => [
           styles.connect,
           {
@@ -549,12 +574,14 @@ function MethodTabs({
 }
 
 function FilePickerField({
+  fieldRef,
   file,
   onPick,
   palette,
   ar,
   disabled,
 }: {
+  fieldRef?: React.Ref<View>;
   file: PickedPlaylist | null;
   onPick: () => void;
   palette: Palette;
@@ -571,11 +598,13 @@ function FilePickerField({
   const warn = file && !looksLikePlaylistName(file.name);
   return (
     <Pressable
+      ref={fieldRef}
       focusable
-      disabled={disabled}
+      // Not `disabled` while loading: it keeps the TV focus; presses are ignored instead.
       accessibilityRole="button"
+      accessibilityState={{ disabled, busy: disabled }}
       accessibilityLabel={file ? file.name : ar ? 'اختيار ملف قائمة التشغيل' : 'Choose playlist file'}
-      onPress={onPick}
+      onPress={disabled ? undefined : onPick}
       style={({ focused, pressed }) => [
         styles.inputWrap,
         {

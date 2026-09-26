@@ -3,7 +3,11 @@ package com.shashtnaplayer
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import android.provider.OpenableColumns
 import java.io.BufferedReader
 import java.io.File
@@ -18,10 +22,12 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import com.facebook.react.bridge.ActivityEventListener
 import com.facebook.react.bridge.Arguments
+import com.facebook.react.bridge.LifecycleEventListener
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
+import com.facebook.react.bridge.UiThreadUtil
 
 /**
  * Lets the user pick an M3U / M3U8 playlist with the system document picker
@@ -45,11 +51,29 @@ import com.facebook.react.bridge.ReactMethod
  * scoped storage does not let the app open. Picked playlists then failed
  * to load.
  *
+ * Picking (Android TV safe):
+ * - the picker is chosen from what really handles the intents (PickerPolicy):
+ *   Android TV "Framework Package Stubs" answer ACTION_OPEN_DOCUMENT without
+ *   being a picker, so they are skipped; with no real picker the call fails
+ *   with E_NO_PICKER instead of leaving the app waiting;
+ * - it is launched on the UI thread, and every piece of picker state is only
+ *   touched there;
+ * - a picker that returns without a result (or never returns one) no longer
+ *   leaves the request pending forever: it is settled as "cancelled" when the
+ *   app resumes, and a later tap starts a new picker instead of E_BUSY;
+ * - reading the picked file's name/size and taking the persistable grant are
+ *   ContentResolver calls into the provider, so they run on the IO thread.
+ *
  * Uses platform APIs only; no extra Gradle dependency.
  */
 class PlaylistPickerModule(private val context: ReactApplicationContext) : ReactContextBaseJavaModule(context) {
 
+  // Picker state: read and written on the UI thread only.
   private var pending: Promise? = null
+  private var launchId = 0
+  private var launchedAt = 0L
+  private var pausedSinceLaunch = false
+  private val main by lazy { Handler(Looper.getMainLooper()) }
 
   /** Open readers by handle; reads run on one background thread, in order. */
   private val readers = ConcurrentHashMap<String, PlaylistReader>()
@@ -61,37 +85,77 @@ class PlaylistPickerModule(private val context: ReactApplicationContext) : React
 
       override fun onActivityResult(activity: Activity, requestCode: Int, resultCode: Int, data: Intent?) {
         if (requestCode != REQUEST_CODE) return
-        val promise = pending ?: return
-        pending = null
+        val promise = take() ?: return
         val uri = data?.data
         if (resultCode != Activity.RESULT_OK || uri == null) {
           promise.resolve(null) // cancelled
           return
         }
-        try {
-          promise.resolve(describe(uri, data?.flags ?: 0))
-        } catch (error: Exception) {
-          promise.reject("E_PICK_FAILED", error.message, error)
+        val flags = data?.flags ?: 0
+        // Provider IPC (grant + name/size query) can be slow on TV storage providers: off the UI thread.
+        io.execute {
+          try {
+            promise.resolve(describe(uri, flags))
+          } catch (error: Exception) {
+            promise.reject("E_PICK_FAILED", error.message, error)
+          }
         }
+      }
+    }
+
+  private val lifecycle: LifecycleEventListener =
+    object : LifecycleEventListener {
+      override fun onHostPause() {
+        if (pending != null) pausedSinceLaunch = true
+      }
+
+      override fun onHostResume() {
+        if (pending == null || !pausedSinceLaunch) return
+        // onActivityResult is delivered before onResume. If the picker came back
+        // without one (TV stubs, some vendor file managers), settle it as cancelled.
+        val id = launchId
+        main.postDelayed({ if (pending != null && launchId == id) take()?.resolve(null) }, RESULT_GRACE_MS)
+      }
+
+      override fun onHostDestroy() {
+        take()?.resolve(null)
       }
     }
 
   init {
     context.addActivityEventListener(listener)
+    context.addLifecycleEventListener(lifecycle)
+  }
+
+  /** Clears and returns the pending picker request (UI thread). */
+  private fun take(): Promise? {
+    val promise = pending ?: return null
+    pending = null
+    pausedSinceLaunch = false
+    return promise
   }
 
   override fun getName(): String = NAME
 
   @ReactMethod
   fun pickPlaylist(promise: Promise) {
+    UiThreadUtil.runOnUiThread { launchPicker(promise) }
+  }
+
+  private fun launchPicker(promise: Promise) {
     val activity = context.currentActivity
     if (activity == null) {
       promise.reject("E_NO_ACTIVITY", "The app is not in the foreground.")
       return
     }
     if (pending != null) {
-      promise.reject("E_BUSY", "A file picker is already open.")
-      return
+      // A second tap right after the first: the picker is still opening.
+      if (SystemClock.elapsedRealtime() - launchedAt < BUSY_WINDOW_MS) {
+        promise.reject("E_BUSY", "A file picker is already open.")
+        return
+      }
+      // An earlier picker never answered: give up on it and open a new one.
+      take()?.resolve(null)
     }
     // Many providers label .m3u files as audio/x-mpegurl, text/plain or
     // application/octet-stream, so every type is offered and the content is
@@ -107,22 +171,46 @@ class PlaylistPickerModule(private val context: ReactApplicationContext) : React
         addCategory(Intent.CATEGORY_OPENABLE)
         type = "*/*"
       }
+    val choice =
+      PickerPolicy.choose(handlersOf(openDocument), handlersOf(getContent), context.packageName)
+    val attempts: List<Intent> =
+      when (choice) {
+        is PickerPolicy.Choice.NoPicker -> emptyList()
+        // As before: OPEN_DOCUMENT, then GET_CONTENT if nothing handles it.
+        is PickerPolicy.Choice.Legacy -> listOf(openDocument, getContent)
+        is PickerPolicy.Choice.Launch -> {
+          val intent = if (choice.action == PickerPolicy.Action.OPEN_DOCUMENT) openDocument else getContent
+          choice.packageName?.let { intent.setPackage(it) }
+          if (choice.action == PickerPolicy.Action.OPEN_DOCUMENT) listOf(intent, getContent) else listOf(intent)
+        }
+      }
     pending = promise
-    try {
-      activity.startActivityForResult(openDocument, REQUEST_CODE)
-    } catch (_: ActivityNotFoundException) {
-      // Some Android TV boxes ship without the Documents UI. Started directly
-      // (not through createChooser, which opens an empty chooser and comes
-      // back as a silent "cancel" when nothing can handle it), so a device
-      // with no file manager at all is reported as such.
+    launchId += 1
+    launchedAt = SystemClock.elapsedRealtime()
+    pausedSinceLaunch = false
+    for (intent in attempts) {
       try {
-        activity.startActivityForResult(getContent, REQUEST_CODE)
+        activity.startActivityForResult(intent, REQUEST_CODE)
+        return
       } catch (_: ActivityNotFoundException) {
-        pending = null
-        promise.reject("E_NO_PICKER", "No file picker is installed on this device.")
+        // Try the next way to pick a file.
+      } catch (error: Exception) {
+        take()?.reject("E_PICKER_FAILED", error.message ?: "The file picker could not be opened.", error)
+        return
       }
     }
+    take()?.reject("E_NO_PICKER", "No file picker is available on this device.")
   }
+
+  /** Packages whose activities answer [intent] (needs the <queries> in AndroidManifest.xml). */
+  private fun handlersOf(intent: Intent): List<String> =
+    try {
+      context.packageManager
+        .queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
+        .mapNotNull { it.activityInfo?.packageName }
+    } catch (_: Exception) {
+      emptyList()
+    }
 
   /** Opens a picked playlist (content:// or file://) for reading; resolves a handle. */
   @ReactMethod
@@ -203,6 +291,8 @@ class PlaylistPickerModule(private val context: ReactApplicationContext) : React
   }
 
   override fun invalidate() {
+    context.removeLifecycleEventListener(lifecycle)
+    UiThreadUtil.runOnUiThread { take()?.resolve(null) }
     readers.keys.toList().forEach { close(it) }
     io.shutdown()
     super.invalidate()
@@ -260,6 +350,12 @@ class PlaylistPickerModule(private val context: ReactApplicationContext) : React
   companion object {
     const val NAME = "ShashtnaPlaylistPicker"
     private const val REQUEST_CODE = 0x5A7
+
+    /** After resuming, how long a result may still take before the picker counts as cancelled. */
+    private const val RESULT_GRACE_MS = 600L
+
+    /** A second tap within this window is a double tap, not a stuck picker. */
+    private const val BUSY_WINDOW_MS = 1500L
     private const val BUFFER_CHARS = 64 * 1024
     private const val MIN_CHUNK = 1024
     private const val MAX_CHUNK = 1024 * 1024

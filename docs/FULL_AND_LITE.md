@@ -211,6 +211,20 @@ presses Sign in (unchanged).
   `ACTION_GET_CONTENT` on TV boxes without the Documents UI. If a device has
   no file manager at all, the user is told so (it is started directly, not
   through an empty chooser that would come back as a silent cancel).
+- Android TV / Google TV: many have no DocumentsUI, and ACTION_OPEN_DOCUMENT
+  may still resolve to the "Framework Package Stubs" activity, which cannot
+  pick a file and may return no result. The module therefore checks which
+  apps really handle the picker intents (`PickerPolicy.kt`, `<queries>` in the
+  manifest): the stub is skipped, ACTION_GET_CONTENT is used when only a file
+  manager answers, and with no real picker it fails with «تعذر فتح مدير الملفات
+  على هذا الجهاز» instead of waiting. It launches on the UI thread, settles a
+  picker that returns without a result as "cancelled" when the app resumes
+  (no request is left pending until a force-close), and queries the picked
+  file's name/size off the UI thread. On TV the remote's focus returns to the
+  file field after the picker, and the field and Sign in button stay
+  focusable (inert) while a file loads. Phones and tablets keep the implicit
+  ACTION_OPEN_DOCUMENT exactly as before. Unit tests:
+  `android/app/src/test/java/com/shashtnaplayer/PickerPolicyTest.kt`.
 - The same module reads the picked URI (`openPlaylist` /
   `readPlaylistChunk` / `closePlaylist`): UTF-8 text straight from the
   `ContentResolver`, pulled by JS 256 K characters at a time; the file is

@@ -60,7 +60,12 @@ export async function pickPlaylistFile(): Promise<PickedPlaylist | null> {
   try {
     return await native.pickPlaylist();
   } catch (error: any) {
-    if (error?.code === 'E_NO_PICKER') throw new PickerUnavailableError();
+    // No usable picker, or it could not be started (e.g. Android TV without a file manager).
+    if (error?.code === 'E_NO_PICKER' || error?.code === 'E_PICKER_FAILED') throw new PickerUnavailableError();
+    // A second tap while the picker is still opening: the first request carries on.
+    if (error?.code === 'E_BUSY') return null;
+    // The picked document could not be read (name/size/permission).
+    if (error?.code === 'E_PICK_FAILED') throw new PlaylistReadError(String(error?.message || error), error.code);
     throw error;
   }
 }

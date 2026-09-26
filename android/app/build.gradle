@@ -219,6 +219,8 @@ rootProject.subprojects { lib ->
 }
 
 dependencies {
+    // JVM unit tests (android/app/src/test): PickerPolicyTest.
+    testImplementation("junit:junit:4.13.2")
     implementation("com.facebook.react:react-android")
 
     if (hermesEnabled.toBoolean()) {

@@ -50,8 +50,8 @@ export function describeConnectionError(error: unknown, ar: boolean): { message:
   if (name === 'PickerUnavailableError') {
     return {
       message: pick0(
-        'ما في مدير ملفات على هذا الجهاز لاختيار الملف. ثبّت تطبيق مدير ملفات، أو سجّل الدخول ببيانات الحساب.',
-        'This device has no file picker. Install a file manager app, or sign in with your account details.',
+        'تعذر فتح مدير الملفات على هذا الجهاز. ثبّت تطبيق مدير ملفات، أو سجّل الدخول ببيانات الحساب.',
+        'Could not open a file manager on this device. Install a file manager app, or sign in with your account details.',
       ),
       technical: '',
     };
