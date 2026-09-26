@@ -6,7 +6,8 @@ import { BRAND } from '../design/brand';
  * One switch, one logger. Lines go to logcat (tag ReactNativeJS in release
  * builds too) as `<TAG> {json}`, so a TV test is read with:
  *   adb logcat -s ReactNativeJS:V | grep -E "AMER_TV_(INPUT|CHANNELS)"
- * (native picker lines: adb logcat -s AMER_TV_PICKER:V).
+ * (native picker lines: adb logcat -s AMER_TV_PICKER:V; the JS picker
+ * outcome is AMER_TV_PICKER under ReactNativeJS).
  *
  * Only controlled fields are ever passed in: event names/codes, indexes,
  * counts, channel ids and names. Never stream URLs, server addresses,
@@ -18,7 +19,7 @@ import { BRAND } from '../design/brand';
  */
 export const TV_DIAGNOSTICS = (BRAND.tvDiagnostics as string) === 'on';
 
-export type DiagTag = 'AMER_TV_INPUT' | 'AMER_TV_CHANNELS';
+export type DiagTag = 'AMER_TV_INPUT' | 'AMER_TV_CHANNELS' | 'AMER_TV_PICKER';
 
 type DiagValue = string | number | boolean | null | undefined;
 

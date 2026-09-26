@@ -96,20 +96,61 @@ On the sign-in screen, choose the file tab and press the button.
 
 Expected: one of these, never a device test, factory or media app:
 - the system document picker;
-- a real file manager;
+- the TV's own file manager;
 - the Arabic message «تعذر فتح مدير الملفات على هذا الجهاز».
 
-Expected in the log (`AMER_TV_PICKER`):
+### 3a. Collect the evidence (only package/activity names, filters and permissions: no credentials, URLs or file contents)
 
 ```
-request actions=OPEN_DOCUMENT,GET_CONTENT category=OPENABLE mime=*/*
-candidate action=GET_CONTENT activity=<pkg>/<activity> kind=REJECTED reason=device test/diagnostic tool (name: test) ...
-candidate action=... kind=FILE_MANAGER reason=file manager (browses folders) ...
-selected action=... activity=<pkg>/<activity> kind=...          (or: selected none: E_NO_PICKER)
-result resultCode=-1 ok=true document=true                       (after picking a file; 0 = cancelled)
+adb shell getprop ro.product.model
+adb shell getprop ro.build.version.sdk
+adb logcat -c
+adb logcat -s AMER_TV_PICKER:V ReactNativeJS:V > picker.log     (press «إضافة ملف M3U» now)
 ```
 
-What to check and report:
-- The `candidate` line for the factory app seen before must say `kind=REJECTED`. If it says anything else, send that line: it names the capability that let it through.
+`picker.log` answers the questions in this order:
+
+| Line | Question it answers |
+|---|---|
+| `request ...` | What was asked: actions, discovery types, launch MIME |
+| `discovered action=... activity=pkg/Activity matched=[...] declared=[...] openable=...` | Does OPEN_DOCUMENT / GET_CONTENT resolve at all, and to which activity? Which MIME queries matched, what the filter declares, does it take CATEGORY_OPENABLE? |
+| `candidate ... kind=... score=... reason=... storage= mounts= documentsProvider= folders= control= home=a/b settings=a/b category=` | Why each one was accepted or rejected |
+| `inventory documentsProvider package=... authority=...` | Which DocumentsProviders exist |
+| `inventory app=pkg/Activity label="..." ... pickerIntents=true/false` | Launchable apps with file signals (the TV's file manager should be here), and whether they answer a picker intent at all |
+| `selected ...` or `selected none: E_NO_PICKER` | The final decision |
+| `result resultCode=.. document=.. scheme=content/file` | What the picker returned (only the scheme, never the URI) |
+| `AMER_TV_PICKER {"stage":"js:result","code":"E_NO_PICKER"}` (ReactNativeJS) | The exact code behind the Arabic message: E_NO_PICKER, E_PICKER_FAILED, E_PICK_FAILED, PICKED or CANCELLED |
+
+Cross-check from the system side, where `<pkg>` is the TV's file manager (find it under Settings > Apps, or with the first command):
+
+```
+adb shell pm list packages -s | grep -iE "file|explor|brows|manager|media"
+adb shell cmd package query-activities --brief -a android.intent.action.GET_CONTENT -c android.intent.category.OPENABLE -t "*/*"
+adb shell cmd package query-activities --brief -a android.intent.action.GET_CONTENT -t "*/*"
+adb shell cmd package query-activities --brief -a android.intent.action.OPEN_DOCUMENT -c android.intent.category.OPENABLE -t "*/*"
+adb shell cmd package query-activities --brief -a android.intent.action.GET_CONTENT -t "audio/x-mpegurl"
+adb shell dumpsys package <pkg> > file-manager.txt
+```
+
+`file-manager.txt` holds the manager's activities, intent filters (actions, categories, `mimeType`), providers (`authority`, `MANAGE_DOCUMENTS`) and requested permissions. Older Android versions use `pm query-activities` instead of `cmd package query-activities`.
+
+To check that the file manager's activity really behaves as a picker, open it the way the app does:
+
+```
+adb shell am start -W -a android.intent.action.GET_CONTENT -c android.intent.category.OPENABLE -t "*/*" -n <pkg>/<Activity>
+```
+
+It should open in a "choose a file" mode. Without `-c ...OPENABLE`, try again if the filter lacks OPENABLE.
+
+### 3b. Reading the outcome
+
+| What the log shows | Meaning |
+|---|---|
+| The file manager is `discovered` and `kind=FILE_MANAGER` / `selected` | Fixed on this TV. Pick an `.m3u` and check `result ... scheme=content` (or `file`), then the channels load. |
+| It is `discovered` but `kind=REJECTED` | The `reason=` names the exact rule. Send that line: it is a policy decision to review, not a guess. |
+| It is only in `inventory ... pickerIntents=false` | It does not declare GET_CONTENT / OPEN_DOCUMENT at all, so no app can receive a file from it. The fix is then a different feature: the file manager "opens" the .m3u with عامر IPTV (an ACTION_VIEW import), decided from this evidence. |
+| Nothing about it anywhere | Send `file-manager.txt` and the `query-activities` output. |
+
+Also check:
 - Cancel, then press the button again: a picker must open again.
 - Pick an `.m3u` file: the channels must load exactly as before.

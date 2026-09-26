@@ -92,8 +92,8 @@ class PlaylistPickerModule(private val context: ReactApplicationContext) : React
 
       override fun onActivityResult(activity: Activity, requestCode: Int, resultCode: Int, data: Intent?) {
         if (requestCode != REQUEST_CODE) return
-        // Result code and whether a document came back; never the URI or file name.
-        diag("result resultCode=$resultCode ok=${resultCode == Activity.RESULT_OK} document=${data?.data != null} pending=${pending != null}")
+        // Result code, whether a document came back and its scheme (content/file); never the URI or file name.
+        diag("result resultCode=$resultCode ok=${resultCode == Activity.RESULT_OK} document=${data?.data != null} scheme=${data?.data?.scheme ?: "none"} pending=${pending != null}")
         val promise = take() ?: return
         val uri = data?.data
         if (resultCode != Activity.RESULT_OK || uri == null) {
@@ -155,10 +155,12 @@ class PlaylistPickerModule(private val context: ReactApplicationContext) : React
   fun pickPlaylist(promise: Promise) {
     // Package manager queries (candidates) off the UI thread; picker state on it.
     io.execute {
-      diag("request actions=OPEN_DOCUMENT,GET_CONTENT category=OPENABLE mime=$PICK_MIME")
+      diag("request actions=OPEN_DOCUMENT,GET_CONTENT discovery=openable+plain types=$QUERY_TYPES launchMime=$PICK_MIME")
       val decision =
         try {
-          PickerPolicy.decide(candidates(), context.packageName)
+          val found = candidates()
+          logInventory(found)
+          PickerPolicy.decide(found, context.packageName)
         } catch (error: Exception) {
           diag("candidates failed error=${error.javaClass.simpleName}")
           PickerPolicy.Decision(emptyList(), emptyList())
@@ -188,19 +190,21 @@ class PlaylistPickerModule(private val context: ReactApplicationContext) : React
     // decided by capability (PickerPolicy), not by this wildcard.
     for (verdict in decision.verdicts) {
       val c = verdict.candidate
-      diag("candidate action=${c.action} activity=${c.packageName}/${c.activityName} kind=${verdict.kind} reason=${verdict.reason}" +
-        " types=${c.declaredTypes} system=${c.isSystemApp} manageDocuments=${c.holdsManageDocuments}" +
-        " documentsProvider=${c.exportsDocumentsProvider} folders=${c.browsesFolders} category=${c.category}")
+      diag("candidate action=${c.action} activity=${c.packageName}/${c.activityName} kind=${verdict.kind} score=${verdict.score}" +
+        " reason=${verdict.reason} types=${c.declaredTypes} openable=${c.openable} system=${c.isSystemApp}" +
+        " manageDocuments=${c.holdsManageDocuments} documentsProvider=${c.exportsDocumentsProvider} folders=${c.browsesFolders}" +
+        " storage=${c.requestsStorageAccess} mounts=${c.watchesStorageMounts} control=${c.deviceControlPermissions.size}" +
+        " home=${c.isHomeLauncher}/${c.packageHasHome} settings=${c.isSettingsApp}/${c.packageHasSettings} category=${c.category}")
     }
     pending = promise
     launchId += 1
     launchedAt = SystemClock.elapsedRealtime()
     pausedSinceLaunch = false
     for (launch in decision.launches) {
-      val intent = pickerIntent(launch.action).setClassName(launch.packageName, launch.activityName)
+      val intent = pickerIntent(launch.action, launch.openable).setClassName(launch.packageName, launch.activityName)
       try {
         activity.startActivityForResult(intent, REQUEST_CODE)
-        diag("selected action=${launch.action} mime=$PICK_MIME activity=${launch.packageName}/${launch.activityName} kind=${launch.kind}")
+        diag("selected action=${launch.action} mime=$PICK_MIME openable=${launch.openable} activity=${launch.packageName}/${launch.activityName} kind=${launch.kind} score=${launch.score}")
         return
       } catch (_: ActivityNotFoundException) {
         diag("not started activity=${launch.packageName}/${launch.activityName} (not found), trying next")
@@ -216,61 +220,93 @@ class PlaylistPickerModule(private val context: ReactApplicationContext) : React
     take()?.reject("E_NO_PICKER", "No file picker is available on this device.")
   }
 
-  private fun pickerIntent(action: PickerPolicy.Action): Intent =
+  /**
+   * The picker intent. The launched MIME stays the wildcard: Android labels .m3u
+   * as audio/x-mpegurl, .m3u8 as application/vnd.apple.mpegurl (or octet-stream),
+   * so a text/plain launch type would HIDE the playlist in the picker. Text
+   * preference and media rejection happen when candidates are ranked (PickerPolicy).
+   */
+  private fun pickerIntent(action: PickerPolicy.Action, openable: Boolean = true, mime: String = PICK_MIME): Intent =
     when (action) {
       PickerPolicy.Action.OPEN_DOCUMENT ->
         Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-          addCategory(Intent.CATEGORY_OPENABLE)
-          type = PICK_MIME
+          if (openable) addCategory(Intent.CATEGORY_OPENABLE)
+          type = mime
           addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
         }
       PickerPolicy.Action.GET_CONTENT ->
         Intent(Intent.ACTION_GET_CONTENT).apply {
-          addCategory(Intent.CATEGORY_OPENABLE)
-          type = PICK_MIME
+          if (openable) addCategory(Intent.CATEGORY_OPENABLE)
+          type = mime
         }
     }
 
+  /** One discovered activity, merged over every discovery query it answered. */
+  private class Found(val action: PickerPolicy.Action, val info: ResolveInfo) {
+    val types = LinkedHashSet<String>()
+    var typesKnown = false
+    var openable = false
+    val matched = LinkedHashSet<String>()
+  }
+
   /**
-   * Every activity answering the two picker intents, with the facts PickerPolicy
-   * needs (needs the <queries> in AndroidManifest.xml). Only package manager
-   * reads; nothing is launched here.
+   * Every activity answering OPEN_DOCUMENT / GET_CONTENT, found with a small,
+   * fixed set of queries: with and without CATEGORY_OPENABLE (an OEM file
+   * manager may not declare it) and for the wildcard plus playlist/text MIME
+   * types; without MATCH_DEFAULT_ONLY, since the chosen activity is launched
+   * explicitly. Needs the <queries> in AndroidManifest.xml. Package manager
+   * reads only; nothing is launched here.
    */
   private fun candidates(): List<PickerPolicy.Candidate> {
     val pm = context.packageManager
-    val facts = HashMap<String, PackageFacts>()
-    val list = ArrayList<PickerPolicy.Candidate>()
+    val found = LinkedHashMap<String, Found>()
     for (action in PickerPolicy.Action.values()) {
-      val infos: List<ResolveInfo> =
-        try {
-          pm.queryIntentActivities(pickerIntent(action), PackageManager.MATCH_DEFAULT_ONLY or PackageManager.GET_RESOLVED_FILTER)
-        } catch (_: Exception) {
-          emptyList()
+      for (openable in listOf(true, false)) {
+        for (mime in QUERY_TYPES) {
+          val infos: List<ResolveInfo> =
+            try {
+              pm.queryIntentActivities(pickerIntent(action, openable, mime), PackageManager.GET_RESOLVED_FILTER)
+            } catch (_: Exception) {
+              emptyList()
+            }
+          for (info in infos) {
+            val activityInfo = info.activityInfo ?: continue
+            val entry = found.getOrPut("$action|${activityInfo.packageName}|${activityInfo.name}") { Found(action, info) }
+            entry.matched.add(if (openable) "$mime+openable" else mime)
+            val filter = info.filter ?: continue
+            entry.typesKnown = true
+            for (i in 0 until filter.countDataTypes()) entry.types.add(filter.getDataType(i))
+            if (filter.hasCategory(Intent.CATEGORY_OPENABLE)) entry.openable = true
+          }
         }
-      for (info in infos) {
-        val activityInfo = info.activityInfo ?: continue
-        val pkg = activityInfo.packageName
-        val f = facts.getOrPut(pkg) { packageFacts(pm, pkg, activityInfo.applicationInfo) }
-        val filter = info.filter
-        val types = filter?.let { (0 until it.countDataTypes()).map { i -> it.getDataType(i) } }
-        list.add(
-          PickerPolicy.Candidate(
-            action = action,
-            packageName = pkg,
-            activityName = activityInfo.name,
-            declaredTypes = types,
-            isSystemApp = f.system,
-            holdsManageDocuments = f.manageDocuments,
-            exportsDocumentsProvider = f.documentsProvider,
-            browsesFolders = f.folders,
-            isHomeLauncher = f.home,
-            isSettingsApp = f.settings,
-            category = f.category,
-          ),
-        )
       }
     }
-    return list
+    val facts = HashMap<String, PackageFacts>()
+    return found.values.map { f ->
+      val activityInfo = f.info.activityInfo
+      val pkg = activityInfo.packageName
+      val p = facts.getOrPut(pkg) { packageFacts(pm, pkg, activityInfo.applicationInfo) }
+      diag("discovered action=${f.action} activity=$pkg/${activityInfo.name} matched=${f.matched} declared=${if (f.typesKnown) f.types else "unknown"} openable=${f.openable}")
+      PickerPolicy.Candidate(
+        action = f.action,
+        packageName = pkg,
+        activityName = activityInfo.name,
+        declaredTypes = if (f.typesKnown) f.types.toList() else null,
+        openable = f.openable,
+        isSystemApp = p.system,
+        holdsManageDocuments = p.manageDocuments,
+        exportsDocumentsProvider = p.documentsProvider,
+        browsesFolders = p.folders,
+        requestsStorageAccess = p.storage,
+        watchesStorageMounts = p.mounts,
+        deviceControlPermissions = p.control,
+        isHomeLauncher = activityInfo.name in p.homeActivities,
+        isSettingsApp = activityInfo.name in p.settingsActivities,
+        packageHasHome = p.homeActivities.isNotEmpty(),
+        packageHasSettings = p.settingsActivities.isNotEmpty(),
+        category = p.category,
+      )
+    }
   }
 
   private class PackageFacts(
@@ -278,15 +314,24 @@ class PlaylistPickerModule(private val context: ReactApplicationContext) : React
     val manageDocuments: Boolean,
     val documentsProvider: Boolean,
     val folders: Boolean,
-    val home: Boolean,
-    val settings: Boolean,
+    val storage: Boolean,
+    val mounts: Boolean,
+    val control: List<String>,
+    val homeActivities: Set<String>,
+    val settingsActivities: Set<String>,
     val category: PickerPolicy.AppCategory,
   )
 
   private fun packageFacts(pm: PackageManager, pkg: String, app: ApplicationInfo?): PackageFacts {
-    fun answers(intent: Intent) =
+    fun activities(intent: Intent): Set<String> =
       try {
-        pm.queryIntentActivities(intent.setPackage(pkg), 0).isNotEmpty()
+        pm.queryIntentActivities(intent.setPackage(pkg), 0).mapNotNull { it.activityInfo?.name }.toSet()
+      } catch (_: Exception) {
+        emptySet()
+      }
+    fun receives(intent: Intent) =
+      try {
+        pm.queryBroadcastReceivers(intent.setPackage(pkg), 0).isNotEmpty()
       } catch (_: Exception) {
         false
       }
@@ -298,20 +343,27 @@ class PlaylistPickerModule(private val context: ReactApplicationContext) : React
       } catch (_: Exception) {
         false
       }
-    val documentsProvider =
+    @Suppress("DEPRECATION")
+    val info =
       try {
-        @Suppress("DEPRECATION")
-        pm.getPackageInfo(pkg, PackageManager.GET_PROVIDERS).providers?.any { it.exported && it.readPermission == MANAGE_DOCUMENTS } == true
+        pm.getPackageInfo(pkg, PackageManager.GET_PROVIDERS or PackageManager.GET_PERMISSIONS)
       } catch (_: Exception) {
-        false
+        null
       }
+    val documentsProvider = info?.providers?.any { it.exported && it.readPermission == MANAGE_DOCUMENTS } == true
+    val requested = info?.requestedPermissions?.toSet() ?: emptySet()
+    val storage = requested.any { it in STORAGE_PERMISSIONS }
+    val control = requested.filter { it in PickerPolicy.DEVICE_CONTROL_PERMISSIONS }.sorted()
     val folders =
       FOLDER_TYPES.any { type ->
-        answers(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse("file:///storage/emulated/0"), type)) ||
-          answers(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse("content://$pkg/folder"), type))
+        activities(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse("file:///storage/emulated/0"), type)).isNotEmpty() ||
+          activities(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse("content://$pkg/folder"), type)).isNotEmpty()
       }
-    val home = answers(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME))
-    val settings = answers(Intent(Settings.ACTION_SETTINGS))
+    val mounts =
+      receives(Intent(Intent.ACTION_MEDIA_MOUNTED, Uri.parse("file:///storage"))) ||
+        receives(Intent(Intent.ACTION_MEDIA_UNMOUNTED, Uri.parse("file:///storage")))
+    val home = activities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME))
+    val settings = activities(Intent(Settings.ACTION_SETTINGS))
     val category =
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && app != null) {
         when (app.category) {
@@ -329,7 +381,47 @@ class PlaylistPickerModule(private val context: ReactApplicationContext) : React
       } else {
         PickerPolicy.AppCategory.UNDEFINED
       }
-    return PackageFacts(system, manageDocuments, documentsProvider, folders, home, settings, category)
+    return PackageFacts(system, manageDocuments, documentsProvider, folders, storage, mounts, control, home, settings, category)
+  }
+
+  /**
+   * Diagnostics only: what else on the device could be "the file manager".
+   * Lists document providers and launchable apps with file signals, and says
+   * whether each answers a picker intent. If the TV's file manager shows up here
+   * with pickerIntents=false, it cannot return a file to another app at all.
+   */
+  private fun logInventory(candidates: List<PickerPolicy.Candidate>) {
+    if (!BuildConfig.TV_DIAGNOSTICS) return
+    val pm = context.packageManager
+    try {
+      pm.queryIntentContentProviders(Intent(DOCUMENTS_PROVIDER_ACTION), 0).forEach {
+        val provider = it.providerInfo ?: return@forEach
+        diag("inventory documentsProvider package=${provider.packageName} authority=${provider.authority}")
+      }
+    } catch (_: Exception) {
+      diag("inventory documentsProvider query failed")
+    }
+    val pickers = candidates.map { it.packageName }.toSet()
+    val launchable = LinkedHashMap<String, ResolveInfo>()
+    for (category in listOf(Intent.CATEGORY_LAUNCHER, Intent.CATEGORY_LEANBACK_LAUNCHER)) {
+      try {
+        pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(category), 0).forEach {
+          val a = it.activityInfo ?: return@forEach
+          launchable.putIfAbsent("${a.packageName}/${a.name}", it)
+        }
+      } catch (_: Exception) {
+        // Visibility or vendor error: the inventory is best effort.
+      }
+    }
+    val facts = HashMap<String, PackageFacts>()
+    for ((component, info) in launchable) {
+      val pkg = info.activityInfo.packageName
+      val f = facts.getOrPut(pkg) { packageFacts(pm, pkg, info.activityInfo.applicationInfo) }
+      if (!(f.documentsProvider || f.folders || f.storage || f.mounts)) continue
+      val label = try { info.loadLabel(pm).toString() } catch (_: Exception) { "?" }
+      diag("inventory app=$component label=\"$label\" system=${f.system} documentsProvider=${f.documentsProvider}" +
+        " folders=${f.folders} storage=${f.storage} mounts=${f.mounts} control=${f.control.size} pickerIntents=${pkg in pickers}")
+    }
   }
 
   /** AMER_TV_PICKER lines (adb logcat -s AMER_TV_PICKER): package/activity names and decisions only. */
@@ -477,6 +569,16 @@ class PlaylistPickerModule(private val context: ReactApplicationContext) : React
     private const val DIAG_TAG = "AMER_TV_PICKER"
     private const val PICK_MIME = "*/*"
     private const val MANAGE_DOCUMENTS = "android.permission.MANAGE_DOCUMENTS"
+    private const val DOCUMENTS_PROVIDER_ACTION = "android.content.action.DOCUMENTS_PROVIDER"
+
+    /** Discovery MIME types: the wildcard plus what .m3u / .m3u8 / text files are labelled as. */
+    private val QUERY_TYPES = listOf("*/*", "text/plain", "audio/x-mpegurl", "application/vnd.apple.mpegurl", "application/octet-stream")
+    private val STORAGE_PERMISSIONS = setOf(
+      "android.permission.READ_EXTERNAL_STORAGE",
+      "android.permission.WRITE_EXTERNAL_STORAGE",
+      "android.permission.MANAGE_EXTERNAL_STORAGE",
+      "android.permission.MOUNT_UNMOUNT_FILESYSTEMS",
+    )
     private val FOLDER_TYPES = listOf("resource/folder", "inode/directory", "vnd.android.document/directory", "x-directory/normal")
     private const val REQUEST_CODE = 0x5A7
 

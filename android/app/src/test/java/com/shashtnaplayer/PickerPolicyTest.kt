@@ -44,7 +44,11 @@ class PickerPolicyTest {
   private val launcher = Candidate(Action.GET_CONTENT, "com.vendor.launcher", "com.vendor.launcher.Home", any, isSystemApp = true, isHomeLauncher = true)
   private val userApp = Candidate(Action.GET_CONTENT, "com.example.cloud", "com.example.cloud.PickFile", any)
 
-  private fun launch(c: Candidate, kind: Kind) = Choice.Launch(c.action, c.packageName, c.activityName, kind)
+  /** A launch, compared by what is launched (action, exact activity, tier, OPENABLE); the score is checked separately. */
+  private fun launch(c: Candidate, kind: Kind) = "${c.action} ${c.packageName}/${c.activityName} $kind openable=${c.openable}"
+  private fun key(choice: Choice): String =
+    if (choice is Choice.Launch) "${choice.action} ${choice.packageName}/${choice.activityName} ${choice.kind} openable=${choice.openable}" else "NoPicker"
+  private fun keys(d: PickerPolicy.Decision) = d.launches.map(::key)
   private fun kindOf(c: Candidate) = PickerPolicy.classify(c, own).kind
 
   // --- the previous scenarios, on the new policy -------------------------
@@ -52,12 +56,12 @@ class PickerPolicyTest {
   @Test
   fun phoneWithDocumentsUiOpensDocumentsUiWithOpenDocument() {
     val d = PickerPolicy.decide(listOf(googleDocumentsUi, googleDocumentsUi.copy(action = Action.GET_CONTENT, activityName = "x.GetContentActivity")), own)
-    assertEquals(launch(googleDocumentsUi, Kind.DOCUMENTS_UI), d.choice)
+    assertEquals(launch(googleDocumentsUi, Kind.DOCUMENTS_UI), key(d.choice))
   }
 
   @Test
   fun tvWithOnlyTheStubAndAFileManagerUsesGetContentPinnedToTheFileManager() {
-    assertEquals(launch(fileManagerGet, Kind.FILE_MANAGER), PickerPolicy.decide(listOf(tvStubOpen, tvStubGet, fileManagerGet), own).choice)
+    assertEquals(launch(fileManagerGet, Kind.FILE_MANAGER), key(PickerPolicy.decide(listOf(tvStubOpen, tvStubGet, fileManagerGet), own).choice))
   }
 
   @Test
@@ -68,12 +72,12 @@ class PickerPolicyTest {
 
   @Test
   fun realDocumentsUiNextToAStubIsPinnedSoTheStubCannotWin() {
-    assertEquals(launch(documentsUi, Kind.DOCUMENTS_UI), PickerPolicy.decide(listOf(tvStubOpen, documentsUi, tvStubGet), own).choice)
+    assertEquals(launch(documentsUi, Kind.DOCUMENTS_UI), key(PickerPolicy.decide(listOf(tvStubOpen, documentsUi, tvStubGet), own).choice))
   }
 
   @Test
   fun tvWithAFileManagerForOpenDocumentUsesItPinned() {
-    assertEquals(launch(fileManagerOpen, Kind.FILE_MANAGER), PickerPolicy.decide(listOf(fileManagerOpen), own).choice)
+    assertEquals(launch(fileManagerOpen, Kind.FILE_MANAGER), key(PickerPolicy.decide(listOf(fileManagerOpen), own).choice))
   }
 
   @Test
@@ -86,7 +90,7 @@ class PickerPolicyTest {
   fun theAppItselfIsNeverAPicker() {
     val self = userApp.copy(packageName = own, activityName = "$own.MainActivity")
     assertEquals(Choice.NoPicker, PickerPolicy.decide(listOf(self, self.copy(action = Action.OPEN_DOCUMENT)), own).choice)
-    assertEquals(launch(fileManagerGet, Kind.FILE_MANAGER), PickerPolicy.decide(listOf(self, fileManagerGet), own).choice)
+    assertEquals(launch(fileManagerGet, Kind.FILE_MANAGER), key(PickerPolicy.decide(listOf(self, fileManagerGet), own).choice))
   }
 
   @Test
@@ -108,7 +112,7 @@ class PickerPolicyTest {
   @Test
   fun factoryTestAppNextToARealFileManagerNeverWinsEvenWhenListedFirst() {
     val d = PickerPolicy.decide(listOf(factoryTestNamed, unnamedSystemTool, audioVideoTest, fileManagerGet), own)
-    assertEquals(listOf(launch(fileManagerGet, Kind.FILE_MANAGER)), d.launches)
+    assertEquals(listOf(launch(fileManagerGet, Kind.FILE_MANAGER)), keys(d))
   }
 
   @Test
@@ -124,7 +128,7 @@ class PickerPolicyTest {
   fun aPreinstalledToolWithANeutralNameIsRejectedByCapability() {
     val v = PickerPolicy.classify(unnamedSystemTool, own)
     assertEquals(Kind.REJECTED, v.kind)
-    assertEquals("preinstalled app with no document capability", v.reason)
+    assertEquals("preinstalled app with no file capability (no DocumentsProvider, folders, storage access or mounts)", v.reason)
   }
 
   @Test
@@ -137,8 +141,8 @@ class PickerPolicyTest {
 
   @Test
   fun settingsAndLaunchersAreRejected() {
-    assertEquals("settings app", PickerPolicy.classify(settings, own).reason)
-    assertEquals("home launcher", PickerPolicy.classify(launcher, own).reason)
+    assertEquals("settings activity", PickerPolicy.classify(settings, own).reason)
+    assertEquals("home launcher activity", PickerPolicy.classify(launcher, own).reason)
   }
 
   @Test
@@ -156,17 +160,19 @@ class PickerPolicyTest {
   // --- accepted kinds and order --------------------------------------------
 
   @Test
-  fun preferenceOrderIsDocumentsUiThenFileManagerThenControlledFallback() {
+  fun preferenceOrderIsDocumentsUiThenFileManagersByScoreThenControlledFallback() {
     val d = PickerPolicy.decide(listOf(userApp, vendorFileBrowser, fileManagerGet, documentsUi), own)
     assertEquals(
       listOf(
         launch(documentsUi, Kind.DOCUMENTS_UI),
+        launch(fileManagerGet, Kind.FILE_MANAGER), // DocumentsProvider + folders: higher score
         launch(vendorFileBrowser, Kind.FILE_MANAGER),
-        launch(fileManagerGet, Kind.FILE_MANAGER),
         launch(userApp, Kind.GENERIC_CONTENT),
       ),
-      d.launches,
+      keys(d),
     )
+    // Deterministic: the same set in any order gives the same ranking.
+    assertEquals(keys(d), keys(PickerPolicy.decide(listOf(documentsUi, fileManagerGet, userApp, vendorFileBrowser), own)))
   }
 
   @Test
@@ -176,7 +182,7 @@ class PickerPolicyTest {
 
   @Test
   fun userInstalledGenericPickerIsTheControlledFallback() {
-    assertEquals(launch(userApp, Kind.GENERIC_CONTENT), PickerPolicy.decide(listOf(tvStubOpen, tvStubGet, factoryTestNamed, userApp), own).choice)
+    assertEquals(launch(userApp, Kind.GENERIC_CONTENT), key(PickerPolicy.decide(listOf(tvStubOpen, tvStubGet, factoryTestNamed, userApp), own).choice))
   }
 
   @Test
@@ -196,5 +202,91 @@ class PickerPolicyTest {
   @Test
   fun duplicatesAreCollapsed() {
     assertEquals(1, PickerPolicy.decide(listOf(fileManagerGet, fileManagerGet), own).launches.size)
+  }
+
+  // --- the TV with a working system file manager (E_NO_PICKER on c3fd46d) ----
+
+  /** Typical OEM TV file manager: preinstalled, GET_CONTENT for any type, storage access, no DocumentsProvider or folder VIEW. */
+  private val oemFileManager = Candidate(
+    Action.GET_CONTENT, "com.oem.tv.filemanager", "com.oem.tv.filemanager.FileChooserActivity", any,
+    isSystemApp = true, requestsStorageAccess = true,
+  )
+
+  @Test
+  fun oemSystemFileManagerIsDiscoveredAcceptedAndSelectedNotNoPicker() {
+    val d = PickerPolicy.decide(listOf(tvStubOpen, tvStubGet, oemFileManager), own)
+    assertEquals(launch(oemFileManager, Kind.FILE_MANAGER), key(d.choice))
+    assertTrue(d.choice != Choice.NoPicker)
+    assertEquals("system file manager (storage access)", d.verdicts.single { it.candidate == oemFileManager }.reason)
+  }
+
+  @Test
+  fun oemFileManagerThatOnlyWatchesStorageMountsIsAccepted() {
+    val m = oemFileManager.copy(requestsStorageAccess = false, watchesStorageMounts = true)
+    assertEquals(Kind.FILE_MANAGER, kindOf(m))
+  }
+
+  @Test
+  fun oemFileManagerWithoutOpenableIsAcceptedAndLaunchedWithoutIt() {
+    val noOpenable = oemFileManager.copy(openable = false)
+    val d = PickerPolicy.decide(listOf(tvStubOpen, noOpenable), own)
+    val choice = d.choice as Choice.Launch
+    assertEquals(Kind.FILE_MANAGER, choice.kind)
+    assertEquals(false, choice.openable) // same form it answered; explicit component launch
+  }
+
+  @Test
+  fun fileManagerActivityShippedInsideTheLauncherPackageIsAccepted() {
+    // Only the HOME activity itself is rejected; its package's other activities are judged on their own.
+    val inLauncher = oemFileManager.copy(packageName = "com.oem.tvlauncher", activityName = "com.oem.tvlauncher.files.PickFile", packageHasHome = true)
+    val v = PickerPolicy.classify(inLauncher, own)
+    assertEquals(Kind.FILE_MANAGER, v.kind)
+    assertTrue(v.score < PickerPolicy.classify(oemFileManager, own).score)
+    assertEquals(Kind.REJECTED, kindOf(inLauncher.copy(activityName = "com.oem.tvlauncher.Home", isHomeLauncher = true)))
+  }
+
+  @Test
+  fun fileBrowserInAMediaCenterPackageIsAcceptedOnlyWithRealFileCapability() {
+    val mediaCenter = Candidate(Action.GET_CONTENT, "com.oem.mediacenter", "com.oem.mediacenter.FileBrowser", any, isSystemApp = true, category = AppCategory.VIDEO)
+    assertEquals(Kind.REJECTED, kindOf(mediaCenter.copy(requestsStorageAccess = true))) // a video app with storage access is still a video app
+    assertEquals(Kind.FILE_MANAGER, kindOf(mediaCenter.copy(browsesFolders = true)))
+  }
+
+  @Test
+  fun ordinaryWordsContainingDiagAreNotDiagnosticTools() {
+    val gallery = oemFileManager.copy(packageName = "com.oem.mediagallery", activityName = "com.oem.mediagallery.Files")
+    assertEquals(null, PickerPolicy.diagnosticWord(gallery))
+    assertEquals(Kind.FILE_MANAGER, kindOf(gallery))
+    assertEquals("hwdiag", PickerPolicy.diagnosticWord(userApp.copy(packageName = "com.oem.hwdiag", activityName = "x.Main")))
+  }
+
+  @Test
+  fun aNeutrallyNamedFactoryToolIsRejectedByItsDeviceControlPermissions() {
+    val tool = oemFileManager.copy(
+      packageName = "com.vendor.toolbox", activityName = "com.vendor.toolbox.Main",
+      deviceControlPermissions = listOf("android.permission.REBOOT", "android.permission.RECOVERY"),
+    )
+    val v = PickerPolicy.classify(tool, own)
+    assertEquals(Kind.REJECTED, v.kind)
+    assertEquals("device-control permissions (REBOOT, RECOVERY)", v.reason)
+  }
+
+  @Test
+  fun documentsUiStillWinsOverTheOemFileManager() {
+    assertEquals(launch(documentsUi, Kind.DOCUMENTS_UI), key(PickerPolicy.decide(listOf(oemFileManager, documentsUi), own).choice))
+  }
+
+  @Test
+  fun textCapableFiltersRankAboveWildcardOnlyOnes() {
+    val text = oemFileManager.copy(packageName = "com.b.files", activityName = "com.b.files.Pick", declaredTypes = listOf("text"))
+    val wildcard = oemFileManager.copy(packageName = "com.a.files", activityName = "com.a.files.Pick")
+    val d = PickerPolicy.decide(listOf(wildcard, text), own)
+    assertEquals(listOf(launch(text, Kind.FILE_MANAGER), launch(wildcard, Kind.FILE_MANAGER)), keys(d))
+  }
+
+  @Test
+  fun stubAndFactoryOnlyIsStillNoPickerWithTheNewSignals() {
+    val factoryWithStorage = factoryTestNamed.copy(requestsStorageAccess = true)
+    assertEquals(Choice.NoPicker, PickerPolicy.decide(listOf(tvStubOpen, tvStubGet, factoryWithStorage, audioVideoTest, settings, launcher), own).choice)
   }
 }

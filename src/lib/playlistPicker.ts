@@ -1,5 +1,7 @@
 import { NativeModules, TurboModuleRegistry } from 'react-native';
 
+import { tvDiag } from './tvDiagnostics';
+
 /**
  * JS side of ShashtnaPlaylistPicker (android/app/.../PlaylistPickerModule.kt):
  * opens the system document picker, returns the picked file's content:// URI,
@@ -58,8 +60,12 @@ export async function pickPlaylistFile(): Promise<PickedPlaylist | null> {
   const native = resolveNative();
   if (!native) throw new PickerUnavailableError();
   try {
-    return await native.pickPlaylist();
+    const picked = await native.pickPlaylist();
+    // Outcome only: never the URI or the file name.
+    tvDiag('AMER_TV_PICKER', { stage: 'js:result', code: picked ? 'PICKED' : 'CANCELLED' });
+    return picked;
   } catch (error: any) {
+    tvDiag('AMER_TV_PICKER', { stage: 'js:result', code: String(error?.code || 'UNKNOWN') });
     // No usable picker, or it could not be started (e.g. Android TV without a file manager).
     if (error?.code === 'E_NO_PICKER' || error?.code === 'E_PICKER_FAILED') throw new PickerUnavailableError();
     // A second tap while the picker is still opening: the first request carries on.
