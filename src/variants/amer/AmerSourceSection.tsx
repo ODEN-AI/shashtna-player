@@ -7,6 +7,7 @@ import { usePalette } from '../../design/palette';
 import { SHASHTNA_THEME } from '../../design/theme';
 import { pickPlaylistFile } from '../../lib/playlistPicker';
 import { describeConnectionError } from '../../screens/Connection/connectionErrors';
+import { AMER_BUILT_IN_LABEL } from './builtInPlaylist';
 import type { ImportProgress, ImportRequest } from './useAmerPlaylist';
 import { requestSignOut, useAmerSource } from './useAmerPlaylist';
 
@@ -17,7 +18,9 @@ import { requestSignOut, useAmerSource } from './useAmerPlaylist';
  * - M3U file: current file, channel count, replace / read again (as in Lite).
  * - Account: "حساب IPTV" with `username @ server` (never the password),
  *   channel count, refresh from the server.
- * - Both: "تغيير المصدر" returns to the sign-in screen.
+ * - Built-in: "قنوات عامر المباشرة" and its channel count (nothing to refresh:
+ *   it is part of the app).
+ * - All: "تغيير المصدر" returns to the source screen (built-in, account, file).
  */
 type Props = {
   ar: boolean;
@@ -33,6 +36,7 @@ export default function AmerSourceSection({ ar, fileName, channelCount, onReplac
   const palette = usePalette();
   const source = useAmerSource();
   const account = source?.kind === 'account';
+  const builtIn = source?.kind === 'builtin';
   const [busy, setBusy] = useState<Busy>(null);
   const [error, setError] = useState<unknown>(null);
   const align = ar ? 'right' : 'left';
@@ -64,14 +68,14 @@ export default function AmerSourceSection({ ar, fileName, channelCount, onReplac
 
       <View style={[styles.current, { flexDirection: row, borderColor: palette.border, backgroundColor: palette.surface }]}>
         <View style={[styles.badge, { backgroundColor: palette.primarySoft, borderColor: palette.border }]}>
-          <AppIcon name={account ? 'user' : 'folder'} size={17} color={palette.primary} />
+          <AppIcon name={builtIn ? 'live' : account ? 'user' : 'folder'} size={17} color={palette.primary} />
         </View>
         <View style={styles.body}>
           <Text style={[styles.label, { color: palette.muted, textAlign: align }]}>
-            {account ? (ar ? 'حساب IPTV' : 'IPTV account') : ar ? 'ملف M3U الحالي' : 'Current M3U file'}
+            {builtIn ? (ar ? 'القنوات المدمجة' : 'Built-in channels') : account ? (ar ? 'حساب IPTV' : 'IPTV account') : ar ? 'ملف M3U الحالي' : 'Current M3U file'}
           </Text>
           <Text numberOfLines={1} style={[styles.value, { color: palette.text, textAlign: align }]}>
-            {account ? source?.name : fileName}
+            {builtIn ? (ar ? AMER_BUILT_IN_LABEL.ar : AMER_BUILT_IN_LABEL.en) : account ? source?.name : fileName}
           </Text>
           <Text style={[styles.count, { color: palette.secondary, textAlign: align }]}>
             {ar ? `القنوات: ${channelCount.toLocaleString('ar-IQ')}` : `Channels: ${channelCount.toLocaleString('en-US')}`}
@@ -79,7 +83,7 @@ export default function AmerSourceSection({ ar, fileName, channelCount, onReplac
         </View>
       </View>
 
-      {account ? (
+      {builtIn ? null : account ? (
         <ActionRow
           icon="refresh"
           title={ar ? 'تحديث القنوات' : 'Refresh channels'}
@@ -114,7 +118,7 @@ export default function AmerSourceSection({ ar, fileName, channelCount, onReplac
       <ActionRow
         icon="source"
         title={ar ? 'تغيير المصدر' : 'Change source'}
-        sub={ar ? 'تسجيل الدخول بحساب آخر أو اختيار ملف M3U' : 'Sign in with another account or choose an M3U file'}
+        sub={ar ? 'القنوات المدمجة، حساب IPTV، أو ملف M3U' : 'Built-in channels, an IPTV account, or an M3U file'}
         busy={false}
         disabled={!!busy}
         onPress={requestSignOut}

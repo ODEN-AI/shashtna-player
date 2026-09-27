@@ -7,7 +7,7 @@ import { useAppPreferences } from '../design/AppPreferencesContext';
 import { SHASHTNA_THEME } from '../design/theme';
 import { ShellBackground } from './AppShell';
 
-/** Shown while the saved source is restored or a new library is indexed. */
+/** Shown while the saved (or عامر IPTV built-in) source is loaded or a new library is indexed. */
 export default function LibraryLoadingScreen({ indexing }: { indexing: boolean }) {
   const { language, accent, customAccent } = useAppPreferences();
   const ar = language === 'ar';
@@ -16,9 +16,11 @@ export default function LibraryLoadingScreen({ indexing }: { indexing: boolean }
       <ShellBackground />
       <ActivityIndicator size="large" color={resolveAccent(accent, customAccent).bright} />
       <Text style={styles.title}>
-        {indexing ? (ar ? 'تجهيز المكتبة...' : 'Preparing your library...') : ar ? 'استعادة الاشتراك...' : 'Restoring your subscription...'}
+        {ar ? 'جاري تحميل القنوات...' : 'Loading channels...'}
       </Text>
-      <Text style={styles.subtitle}>{ar ? 'جاري تجهيز مكتبتك تلقائياً' : 'Getting your library ready'}</Text>
+      <Text style={styles.subtitle}>
+        {indexing ? (ar ? 'تجهيز المكتبة...' : 'Preparing your library...') : ar ? 'جاري تجهيز مكتبتك تلقائياً' : 'Getting your library ready'}
+      </Text>
     </View>
   );
 }

@@ -24,7 +24,7 @@ import { looksLikePlaylistName, PickedPlaylist, pickPlaylistFile } from '../../l
 import type { Edition } from '../../app/edition';
 
 /** How the IPTV subscription is provided. The connection type shown is always "IPTV". */
-export type ConnectionMethod = 'account' | 'url' | 'file';
+export type ConnectionMethod = 'builtin' | 'account' | 'url' | 'file';
 type Method = ConnectionMethod;
 
 
@@ -89,7 +89,8 @@ export default function ConnectionScreen({ onConnected, edition, initialMethod, 
   // The M3U link method exists only when the edition supplies it (Full). Lite
   // offers the account and a local M3U file.
   const link = edition.playlistLink;
-  const methods: Method[] = link ? ['account', 'url', 'file'] : ['account', 'file'];
+  const builtIn = edition.builtIn;
+  const methods: Method[] = [...(builtIn ? (['builtin'] as Method[]) : []), 'account', ...(link ? (['url'] as Method[]) : []), 'file'];
   const { language, setLanguage } = useAppPreferences();
   const ar = language === 'ar';
   const palette = usePalette();
@@ -99,7 +100,7 @@ export default function ConnectionScreen({ onConnected, edition, initialMethod, 
   const rowDirection = ar ? 'row-reverse' : 'row';
   const align = ar ? 'right' : 'left';
 
-  const [method, setMethod] = useState<Method>(initialMethod && methods.includes(initialMethod) ? initialMethod : 'account');
+  const [method, setMethod] = useState<Method>(initialMethod && methods.includes(initialMethod) ? initialMethod : builtIn ? 'builtin' : 'account');
   const [playlistUrl, setPlaylistUrl] = useState('');
   const [pickedFile, setPickedFile] = useState<PickedPlaylist | null>(null);
   const [server, setServer] = useState('');
@@ -110,8 +111,13 @@ export default function ConnectionScreen({ onConnected, edition, initialMethod, 
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [count, setCount] = useState(0);
+  /** Built-in playlist problems get their own plain message; the rest as before. */
+  const describe = (e: unknown, forMethod: Method) =>
+    forMethod === 'builtin' && builtIn
+      ? { message: builtIn.errorMessage(ar), technical: String((e as { code?: unknown; name?: unknown })?.code || (e as { name?: unknown })?.name || '') }
+      : describeConnectionError(e, ar);
   const [error, setError] = useState<{ message: string; technical: string } | null>(() =>
-    restoreError ? describeConnectionError(restoreError, ar) : null,
+    restoreError ? describe(restoreError, initialMethod && methods.includes(initialMethod) ? initialMethod : builtIn ? 'builtin' : 'account') : null,
   );
   const [showTechnical, setShowTechnical] = useState(false);
 
@@ -138,6 +144,14 @@ export default function ConnectionScreen({ onConnected, edition, initialMethod, 
       setShowTechnical(false);
       setProgress(0);
       setCount(0);
+
+      if (method === 'builtin' && builtIn) {
+        // Packaged playlist: no network, no sign-in; parsed once per session.
+        const builtInChannels = await builtIn.load(parsed => setCount(parsed));
+        setProgress(100);
+        await onConnected(builtInChannels, builtIn.source, builtIn.tabLabel(ar));
+        return;
+      }
 
       let source: string;
       let sizeHint: number | undefined;
@@ -183,7 +197,7 @@ export default function ConnectionScreen({ onConnected, edition, initialMethod, 
       const label = method === 'account' ? `${username.trim()} @ ${hostOf(source)}` : method === 'file' ? file?.name : undefined;
       await onConnected(channels, source, label);
     } catch (e) {
-      setError(describeConnectionError(e, ar));
+      setError(describe(e, method));
     } finally {
       setLoading(false);
     }
@@ -286,6 +300,8 @@ export default function ConnectionScreen({ onConnected, edition, initialMethod, 
     </View>
   );
 
+  const builtInTone = { flexDirection: rowDirection, borderColor: palette.glassBorder, backgroundColor: dark ? 'rgba(3,7,18,0.52)' : palette.surface } as const;
+
   const form = (
     <View
       style={[
@@ -328,9 +344,13 @@ export default function ConnectionScreen({ onConnected, edition, initialMethod, 
       </View>
 
       <View style={styles.heading}>
-        <Text style={[styles.cardTitle, { color: palette.text, textAlign: align }]}>{ar ? 'تسجيل الدخول' : 'Sign in'}</Text>
+        <Text style={[styles.cardTitle, { color: palette.text, textAlign: align }]}>
+          {builtIn ? (ar ? 'مصدر القنوات' : 'Channel source') : ar ? 'تسجيل الدخول' : 'Sign in'}
+        </Text>
         <Text style={[styles.cardSub, { color: palette.muted, textAlign: align }]}>
-          {method === 'account'
+          {method === 'builtin' && builtIn
+            ? builtIn.description(ar)
+            : method === 'account'
             ? ar ? 'أدخل بيانات اشتراكك وابدأ المشاهدة فوراً.' : 'Enter your subscription details to start watching.'
             : method === 'url' && link
               ? link.subtitle(ar)
@@ -338,7 +358,7 @@ export default function ConnectionScreen({ onConnected, edition, initialMethod, 
         </Text>
       </View>
 
-      <MethodTabs methods={methods} linkLabel={link?.tabLabel(ar)} method={method} onChange={next => { setMethod(next); setError(null); }} palette={palette} ar={ar} disabled={loading} />
+      <MethodTabs methods={methods} linkLabel={link?.tabLabel(ar)} builtInLabel={builtIn?.tabLabel(ar)} method={method} onChange={next => { setMethod(next); setError(null); }} palette={palette} ar={ar} disabled={loading} />
 
       {method === 'url' && link ? (
         <View style={styles.fields}>
@@ -354,6 +374,20 @@ export default function ConnectionScreen({ onConnected, edition, initialMethod, 
             ltrValue
             keyboardType="url"
           />
+        </View>
+      ) : null}
+
+      {method === 'builtin' && builtIn ? (
+        <View
+          style={[styles.builtIn, builtInTone]}
+        >
+          <AppIcon name="live" size={20} color={palette.accent.light} />
+          <View style={styles.fieldBody}>
+            <Text numberOfLines={1} style={[styles.builtInTitle, { color: palette.text, textAlign: align }]}>{builtIn.tabLabel(ar)}</Text>
+            <Text style={[styles.fieldLabel, { color: palette.muted, textAlign: align }]}>
+              {ar ? 'قنوات مباشرة جاهزة داخل التطبيق · بدون تسجيل دخول' : 'Live channels included in the app · no sign-in'}
+            </Text>
+          </View>
         </View>
       ) : null}
 
@@ -433,7 +467,13 @@ export default function ConnectionScreen({ onConnected, edition, initialMethod, 
       >
         {loading ? <ActivityIndicator color="#FFFFFF" /> : null}
         <Text style={styles.connectText}>
-          {loading
+          {method === 'builtin'
+            ? loading
+              ? ar ? 'جاري تحميل القنوات...' : 'Loading channels...'
+              : error
+                ? ar ? 'إعادة المحاولة' : 'Try again'
+                : ar ? 'مشاهدة القنوات' : 'Watch channels'
+            : loading
             ? method === 'file'
               ? ar ? 'جاري قراءة ملف M3U...' : 'Reading the M3U file...'
               : ar ? 'جاري تحميل المحتوى...' : 'Loading content...'
@@ -466,9 +506,27 @@ export default function ConnectionScreen({ onConnected, edition, initialMethod, 
           <AppIcon name="info" size={18} color={SHASHTNA_THEME.colors.danger} />
           <View style={styles.errorCopy}>
             <Text style={[styles.errorTitle, { textAlign: align }]}>
-              {method === 'file' ? (ar ? 'تعذر استيراد ملف M3U' : 'M3U import failed') : ar ? 'تعذر تسجيل الدخول' : 'Sign-in failed'}
+              {method === 'builtin'
+                ? ar ? 'تعذر تحميل القنوات' : 'Channels could not be loaded'
+                : method === 'file' ? (ar ? 'تعذر استيراد ملف M3U' : 'M3U import failed') : ar ? 'تعذر تسجيل الدخول' : 'Sign-in failed'}
             </Text>
             <Text style={[styles.errorBody, { color: palette.secondary, textAlign: align }]}>{error.message}</Text>
+            {method === 'builtin' ? (
+              <Pressable
+                focusable
+                accessibilityRole="button"
+                accessibilityLabel={ar ? 'اختيار مصدر آخر' : 'Choose another source'}
+                onPress={() => {
+                  setMethod('account');
+                  setError(null);
+                }}
+                style={({ focused }) => [styles.techToggle, focused && { borderColor: palette.focus }]}
+              >
+                <Text style={[styles.techToggleText, { color: palette.accent.light, textAlign: align }]}>
+                  {ar ? 'اختيار مصدر آخر' : 'Choose another source'}
+                </Text>
+              </Pressable>
+            ) : null}
             {error.technical ? (
               <Pressable focusable onPress={() => setShowTechnical(v => !v)} style={({ focused }) => [styles.techToggle, focused && { borderColor: palette.focus }]}>
                 <Text style={[styles.techToggleText, { color: palette.accent.light, textAlign: align }]}>
@@ -524,6 +582,7 @@ export default function ConnectionScreen({ onConnected, edition, initialMethod, 
 function MethodTabs({
   methods,
   linkLabel,
+  builtInLabel,
   method,
   onChange,
   palette,
@@ -533,6 +592,8 @@ function MethodTabs({
   methods: Method[];
   /** Label of the M3U link tab, when the edition has one. */
   linkLabel?: string;
+  /** Label of the built-in playlist tab, when the edition has one. */
+  builtInLabel?: string;
   method: Method;
   onChange: (method: Method) => void;
   palette: Palette;
@@ -540,6 +601,7 @@ function MethodTabs({
   disabled: boolean;
 }) {
   const allTabs: Array<{ id: Method; label: string; icon: AppIconName }> = [
+    { id: 'builtin', label: builtInLabel || '', icon: 'live' },
     { id: 'account', label: ar ? 'بيانات الحساب' : 'Account', icon: 'user' },
     { id: 'url', label: linkLabel || '', icon: 'link' },
     { id: 'file', label: ar ? 'ملف M3U' : 'M3U file', icon: 'folder' },
@@ -823,6 +885,8 @@ const styles = StyleSheet.create({
 
   fields: { gap: 10 },
   methods: { height: 44, borderRadius: 14, borderWidth: 1, padding: 3, gap: 3 },
+  builtIn: { alignItems: 'center', gap: 12, borderWidth: 1, borderRadius: 16, paddingHorizontal: 16, paddingVertical: 14, marginTop: 14 },
+  builtInTitle: { fontSize: 16, fontWeight: '800' },
   methodTab: { flex: 1, borderRadius: 11, alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 2, borderColor: 'transparent' },
   methodText: { fontSize: 13, fontWeight: '800', fontFamily: SHASHTNA_FONT.sans },
   fileName: { fontSize: 15, fontFamily: SHASHTNA_FONT.sans, marginTop: 2 },

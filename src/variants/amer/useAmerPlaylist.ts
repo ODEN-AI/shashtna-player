@@ -15,22 +15,31 @@ import {
 } from '../../lib/m3u';
 import { PickedPlaylist, reimportPlaylistFile } from '../../lib/playlistPicker';
 import { tvDiag } from '../../lib/tvDiagnostics';
+import { AMER_BUILT_IN_LABEL, AMER_BUILT_IN_SOURCE, isBuiltInSource, loadBuiltInPlaylist } from './builtInPlaylist';
 
 /**
  * عامر IPTV's content source. Bundled in place of
  * src/variants/lite/useLitePlaylist.ts (metro.amer.config.js) and exposes the
  * same API, so LiteApp runs unchanged.
  *
- * Two ways in, the same as the Shashtna sign-in screen shows in live-only mode:
+ * One saved source string (connectionSession), three kinds:
+ * - builtin: the playlist packaged in the APK (builtInPlaylist.ts). It is the
+ *   default: with nothing saved (a fresh install, or after "تغيير المصدر" and a
+ *   restart) the app opens it straight into Live TV, no sign-in and no picker;
+ *   picking it on the source screen saves it explicitly;
  * - account: server + username + password (Xtream), live channels only
  *   (get_live_categories + get_live_streams); the library is cached for 12 h
  *   without credentials (catalogCache), the source itself is kept in the
  *   Keystore-encrypted connection store;
  * - file: a local M3U file, read and restored exactly like Shashtna Lite.
  * There is no M3U link.
+ *
+ * Launch priority: a saved account or file (the user's explicit choice) >
+ * the built-in playlist > the source screen (only when the built-in playlist
+ * cannot be loaded, with its error and the other sources).
  */
 export type LiteStatus = 'restoring' | 'indexing' | 'import' | 'ready';
-export type SourceKind = 'file' | 'account';
+export type SourceKind = 'builtin' | 'file' | 'account';
 
 export type LitePlaylistInfo = {
   /** The saved source: a content:// URI, or the Xtream get.php URL (holds the credentials; never shown). */
@@ -66,7 +75,7 @@ export function nameFromUri(uri: string): string {
   return /\.m3u8?$/i.test(last) ? last : 'playlist.m3u';
 }
 
-const kindOf = (source: string): SourceKind => (isLocalPlaylistSource(source) ? 'file' : 'account');
+const kindOf = (source: string): SourceKind => (isBuiltInSource(source) ? 'builtin' : isLocalPlaylistSource(source) ? 'file' : 'account');
 
 // ---------------------------------------------------------------------------
 // Shared with the Settings source section and the sign-in screen.
@@ -106,6 +115,7 @@ export function requestSignOut(): void {
 // ---------------------------------------------------------------------------
 
 async function loadSource(source: string, progress: ImportProgress = {}, useCache = false): Promise<M3UChannel[]> {
+  if (isBuiltInSource(source)) return loadBuiltInPlaylist(progress.onChannelCount);
   if (isLocalPlaylistSource(source)) {
     return downloadAndParseM3U(source, progress.onProgress, progress.onChannelCount, { liveOnly: true });
   }
@@ -146,20 +156,19 @@ export function useLitePlaylist(): LitePlaylistSession {
     let alive = true;
     const run = ++generation.current;
     (async () => {
-      const saved = await loadConnectionSource();
+      const stored = await loadConnectionSource();
       if (!alive || run !== generation.current) return;
-      if (!saved || (!isLocalPlaylistSource(saved) && !getXtreamSessionFromSource(saved))) {
-        if (saved) void clearConnectionSource();
-        setStatus('import');
-        return;
-      }
+      const usable = !!stored && (isLocalPlaylistSource(stored) || !!getXtreamSessionFromSource(stored));
+      if (stored && !usable) void clearConnectionSource();
+      // The user's saved account or file first; otherwise the built-in playlist.
+      const saved = usable ? stored! : AMER_BUILT_IN_SOURCE;
       const meta = await readJsonFile<Meta | null>(META_FILE, null);
       const kind = kindOf(saved);
       originalRef.current = meta?.id === fingerprint(saved) ? meta.original : undefined;
       const info: LitePlaylistInfo = {
         uri: saved,
         kind,
-        name: meta?.id === fingerprint(saved) && meta.name ? meta.name : kind === 'file' ? nameFromUri(saved) : '',
+        name: kind === 'builtin' ? AMER_BUILT_IN_LABEL.ar : meta?.id === fingerprint(saved) && meta.name ? meta.name : kind === 'file' ? nameFromUri(saved) : '',
       };
       try {
         setStatus('indexing');
@@ -167,7 +176,8 @@ export function useLitePlaylist(): LitePlaylistSession {
         if (!alive || run !== generation.current) return;
         show(next, info);
       } catch (error) {
-        console.warn('[Amer] Saved source could not be restored:', error);
+        // Kind and error name only: an error's text could carry a source (URL, path).
+        console.warn('[Amer] Source could not be restored:', kind, error instanceof Error ? error.name : 'error');
         if (!alive || run !== generation.current) return;
         lastFailedKind = kind;
         setFailure(error);
@@ -187,7 +197,11 @@ export function useLitePlaylist(): LitePlaylistSession {
       const next = await index(request.channels ?? (await loadSource(source, progress)));
       const kind = kindOf(source);
       tvDiag('AMER_TV_PICKER', { stage: 'import:parsed', kind, liveChannels: next.live.length });
-      const info: LitePlaylistInfo = { uri: source, kind, name: request.name || (kind === 'file' ? nameFromUri(source) : '') };
+      const info: LitePlaylistInfo = {
+        uri: source,
+        kind,
+        name: kind === 'builtin' ? AMER_BUILT_IN_LABEL.ar : request.name || (kind === 'file' ? nameFromUri(source) : ''),
+      };
       if (kind === 'account') {
         const session = getXtreamSessionFromSource(source);
         activateXtreamSession(session);
