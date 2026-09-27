@@ -56,8 +56,8 @@ import com.facebook.react.bridge.WritableMap
  * (INVALID_M3U is decided by the JS parser, which reads the copy.)
  *
  * openPlaylist / readPlaylistChunk / closePlaylist read a playlist (the private
- * copy, or an older content:// source) as UTF-8 text in chunks straight from
- * the ContentResolver, so large playlists never have to fit in memory and
+ * copy, an older content:// source, or an asset:// playlist packaged in the
+ * APK) as UTF-8 text in chunks straight from the ContentResolver / AssetManager, so large playlists never have to fit in memory and
  * Arabic characters are never split between chunks. (Not through
  * react-native-blob-util: it rewrites content:// URIs to file paths that do not
  * exist or cannot be opened.)
@@ -324,6 +324,8 @@ class PlaylistPickerModule(private val context: ReactApplicationContext) : React
           when (parsed.scheme?.lowercase()) {
             "content" -> context.contentResolver.openInputStream(parsed) ?: throw FileNotFoundException("The provider returned no data.")
             "file" -> FileInputStream(File(parsed.path ?: ""))
+            // A playlist packaged in the APK (the عامر IPTV built-in playlist): read-only.
+            "asset" -> context.assets.open((parsed.path ?: "").trimStart('/'))
             else -> throw FileNotFoundException("Unsupported playlist location.")
           }
         val counter = CountingInputStream(input)

@@ -214,6 +214,13 @@ export function createPlainM3UChannel(
 export type ParseOptions = {
   /** Keep live channels only (Shashtna Player Lite). */
   liveOnly?: boolean;
+  /**
+   * The playlist is a live-TV list: every entry is a live channel, whatever
+   * its name or group says ("… Movies", "سينما"). Used for the عامر IPTV
+   * built-in playlist, whose short Xtream URLs carry no /live/ or extension
+   * signal, so name keywords would otherwise drop real live channels.
+   */
+  allLive?: boolean;
 };
 
 /**
@@ -247,6 +254,7 @@ export function createM3UTextParser(
     }
     if (!pendingExtInf) return;
     const channel = createPlainM3UChannel(pendingExtInf, line, entryIndex, options.liveOnly);
+    if (options.allLive) channel.contentType = 'live';
     entryIndex += 1;
     pendingExtInf = '';
     if (options.liveOnly && channel.contentType !== 'live') return;
@@ -389,9 +397,12 @@ export async function parseLocalPlaylist(
   return finishPlaylist(parser, options);
 }
 
-/** A playlist picked from the device (Android content:// or file://). */
+/**
+ * A playlist on the device: picked (Android content:// or its private file://
+ * copy) or packaged in the APK (asset://, the عامر IPTV built-in playlist).
+ */
 export function isLocalPlaylistSource(source: string): boolean {
-  return /^(content|file):\/\//i.test(source.trim());
+  return /^(content|file|asset):\/\//i.test(source.trim());
 }
 
 export type LocalLoadOptions = ParseOptions & {
