@@ -308,11 +308,22 @@ const signIn = async (tree: Tree) => {
   });
 };
 const onSignIn = (tree: Tree) => labelled(tree, 'بيانات الحساب').length > 0;
+/** The source screen opens on the built-in tab; a user presses «بيانات الحساب» to sign in. */
+const openAccountTab = async (tree: Tree) => {
+  await waitFor(tree, () => onSignIn(tree), 'the source screen');
+  await press(tree, 'بيانات الحساب');
+};
 
 describe('عامر IPTV app', () => {
-  it('opens on the Shashtna-style sign-in: بيانات الحساب + ملف M3U, no M3U link, Amer brand', async () => {
+  // In this suite the built-in playlist asset is absent (the test-only "invalid
+  // built-in" case): the app falls back to the source screen. The built-in
+  // playlist itself is covered in amerBuiltInPlaylist.test.tsx.
+  it('without a usable built-in playlist: source screen (built-in error + بيانات الحساب + ملف M3U), no M3U link, Amer brand', async () => {
     const tree = await mount();
     await waitFor(tree, () => onSignIn(tree), 'the sign-in screen');
+    expect(allText(tree)).toContain('تعذر تحميل قائمة القنوات المدمجة.');
+    expect(labelled(tree, 'قنوات عامر المباشرة').length).toBeGreaterThan(0);
+    await press(tree, 'بيانات الحساب');
     const text = everything(tree);
     expect(labelled(tree, 'بيانات الحساب').length).toBeGreaterThan(0);
     expect(labelled(tree, 'ملف M3U').length).toBeGreaterThan(0);
@@ -332,7 +343,7 @@ describe('عامر IPTV app', () => {
   it('signs in with server + username + password: live channels only, Live TV, saved and restored', async () => {
     useXtreamServer();
     let tree = await mount();
-    await waitFor(tree, () => onSignIn(tree), 'the sign-in screen');
+    await openAccountTab(tree);
     await type(tree, 'http://server:port', 'srv.example:8080');
     await type(tree, 'أدخل اسم المستخدم', 'amer');
     await type(tree, 'أدخل كلمة المرور', 'secret');
@@ -377,7 +388,7 @@ describe('عامر IPTV app', () => {
       return { ok: false, status: 401, json: async () => ({}) } as any;
     }) as any;
     const tree = await mount();
-    await waitFor(tree, () => onSignIn(tree), 'the sign-in screen');
+    await openAccountTab(tree);
     await type(tree, 'http://server:port', 'srv.example:8080');
     await type(tree, 'أدخل اسم المستخدم', 'amer');
     await type(tree, 'أدخل كلمة المرور', 'wrong');
