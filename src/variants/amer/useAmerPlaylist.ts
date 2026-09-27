@@ -13,7 +13,8 @@ import {
   M3UChannel,
   NoLiveChannelsError,
 } from '../../lib/m3u';
-import type { PickedPlaylist } from '../../lib/playlistPicker';
+import { PickedPlaylist, reimportPlaylistFile } from '../../lib/playlistPicker';
+import { tvDiag } from '../../lib/tvDiagnostics';
 
 /**
  * عامر IPTV's content source. Bundled in place of
@@ -57,7 +58,8 @@ export type LitePlaylistSession = {
 };
 
 const META_FILE = 'shashtna-lite-playlist.json';
-type Meta = { id: string; name: string; kind: SourceKind };
+/** original: the picked document (content://) the private copy came from, to re-copy it on reload. */
+type Meta = { id: string; name: string; kind: SourceKind; original?: string };
 
 export function nameFromUri(uri: string): string {
   const last = decodeURIComponent(uri.split(/[?#]/)[0]).split(/[/:]/).filter(Boolean).pop() || '';
@@ -130,6 +132,7 @@ export function useLitePlaylist(): LitePlaylistSession {
   const [playlist, setPlaylist] = useState<LitePlaylistInfo | null>(null);
   const [failure, setFailure] = useState<unknown>(null);
   const generation = useRef(0);
+  const originalRef = useRef<string | undefined>(undefined);
 
   const show = useCallback((next: Catalog, info: LitePlaylistInfo) => {
     setCatalog(next);
@@ -152,6 +155,7 @@ export function useLitePlaylist(): LitePlaylistSession {
       }
       const meta = await readJsonFile<Meta | null>(META_FILE, null);
       const kind = kindOf(saved);
+      originalRef.current = meta?.id === fingerprint(saved) ? meta.original : undefined;
       const info: LitePlaylistInfo = {
         uri: saved,
         kind,
@@ -182,6 +186,7 @@ export function useLitePlaylist(): LitePlaylistSession {
       const source = request.uri;
       const next = await index(request.channels ?? (await loadSource(source, progress)));
       const kind = kindOf(source);
+      tvDiag('AMER_TV_PICKER', { stage: 'import:parsed', kind, liveChannels: next.live.length });
       const info: LitePlaylistInfo = { uri: source, kind, name: request.name || (kind === 'file' ? nameFromUri(source) : '') };
       if (kind === 'account') {
         const session = getXtreamSessionFromSource(source);
@@ -189,7 +194,8 @@ export function useLitePlaylist(): LitePlaylistSession {
         if (session) void saveLibraryCache(source, session, next.live, true);
       }
       await saveConnectionSource(source);
-      await writeJsonFile(META_FILE, { id: fingerprint(source), name: info.name, kind } satisfies Meta);
+      originalRef.current = kind === 'file' ? request.original : undefined;
+      await writeJsonFile(META_FILE, { id: fingerprint(source), name: info.name, kind, original: originalRef.current } satisfies Meta);
       lastFailedKind = null;
       if (run === generation.current) show(next, info);
       return next;
@@ -199,10 +205,16 @@ export function useLitePlaylist(): LitePlaylistSession {
 
   const reload = useCallback(async () => {
     if (!playlist) return;
+    // A file is a private copy: "read the file again" copies the original document again.
+    if (playlist.kind === 'file' && originalRef.current) {
+      const picked = await reimportPlaylistFile(originalRef.current);
+      await importFile({ ...picked, name: playlist.name || picked.name });
+      return;
+    }
     const run = ++generation.current;
     const next = await index(await loadSource(playlist.uri));
     if (run === generation.current) setCatalog(next);
-  }, [playlist]);
+  }, [importFile, playlist]);
 
   useEffect(() => {
     signOutHandler = () => {
@@ -211,6 +223,7 @@ export function useLitePlaylist(): LitePlaylistSession {
       void clearLibraryCache();
       void deleteJsonFile(META_FILE);
       clearXtreamSession();
+      originalRef.current = undefined;
       lastFailedKind = null;
       setCatalog(emptyCatalog());
       setPlaylist(null);

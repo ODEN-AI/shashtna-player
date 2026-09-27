@@ -1,5 +1,6 @@
 import ReactNativeBlobUtil from 'react-native-blob-util';
 
+import { prunePlaylistCopies } from './playlistPicker';
 import { isSecureStoreAvailable, secureGet, secureRemove, secureSet } from './secureStore';
 
 /**
@@ -50,7 +51,12 @@ async function writeLegacyFile(source: string): Promise<void> {
 export async function saveConnectionSource(source: string): Promise<void> {
   const value = String(source || '').trim();
   if (!value) return;
+  await persist(value);
+  // Imported M3U files are private copies: keep only the one that is the source now.
+  prunePlaylistCopies([value]).catch(() => undefined);
+}
 
+async function persist(value: string): Promise<void> {
   try {
     if (isSecureStoreAvailable()) {
       const payload: SavedConnection = { source: value, savedAt: Date.now() };
@@ -98,4 +104,5 @@ export async function clearConnectionSource(): Promise<void> {
     console.warn('[Shashtna] Failed to clear secure connection:', error);
   }
   await deleteLegacyFile();
+  prunePlaylistCopies([]).catch(() => undefined);
 }

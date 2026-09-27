@@ -39,12 +39,19 @@ export function describeConnectionError(error: unknown, ar: boolean): { message:
   }
   if (name === 'PlaylistReadError') {
     const detail = error instanceof Error ? error.message : '';
+    const reason = String((error as { reason?: unknown }).reason || '');
+    if (reason === 'too_large') {
+      return {
+        message: pick0('الملف كبير جداً ولا يبدو ملف قائمة تشغيل. اختر ملف ‎.m3u أو ‎.m3u8.', 'The file is too large to be a playlist. Choose an .m3u or .m3u8 file.'),
+        technical: 'FILE_READ_FAILED:too_large',
+      };
+    }
     return {
       message: pick0(
         'تعذر قراءة ملف M3U. ربما انحذف الملف أو انسحبت صلاحية الوصول إليه. اختر الملف مرة ثانية.',
         'The M3U file could not be read. It may have been removed or access was revoked. Choose the file again.',
       ),
-      technical: redactSecrets(detail).slice(0, 300),
+      technical: `FILE_READ_FAILED:${reason || 'io'} ${redactSecrets(detail)}`.slice(0, 300),
     };
   }
   if (name === 'PickerUnavailableError') {
@@ -53,7 +60,7 @@ export function describeConnectionError(error: unknown, ar: boolean): { message:
         'تعذر فتح مدير الملفات على هذا الجهاز. ثبّت تطبيق مدير ملفات، أو سجّل الدخول ببيانات الحساب.',
         'Could not open a file manager on this device. Install a file manager app, or sign in with your account details.',
       ),
-      technical: '',
+      technical: String((error as { code?: unknown }).code || 'PICKER_UNAVAILABLE'),
     };
   }
 

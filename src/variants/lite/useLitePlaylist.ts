@@ -4,7 +4,7 @@ import { buildCatalogAsync, Catalog, emptyCatalog } from '../../features/catalog
 import { clearConnectionSource, loadConnectionSource, saveConnectionSource } from '../../lib/connectionSession';
 import { readJsonFile, writeJsonFile, deleteJsonFile } from '../../lib/jsonFileStore';
 import { DownloadProgress, isLocalPlaylistSource, loadLocalPlaylist, NoLiveChannelsError } from '../../lib/m3uCore';
-import type { PickedPlaylist } from '../../lib/playlistPicker';
+import { PickedPlaylist, reimportPlaylistFile } from '../../lib/playlistPicker';
 
 /**
  * Shashtna Player Lite's only content source: an M3U file on the device.
@@ -23,6 +23,8 @@ export type LitePlaylistInfo = {
   uri: string;
   /** File name shown in Settings ("playlist.m3u"). */
   name: string;
+  /** The picked document the private copy came from (re-copied on reload). */
+  original?: string;
 };
 
 export type ImportProgress = {
@@ -82,7 +84,8 @@ export function useLitePlaylist(): LitePlaylistSession {
         return;
       }
       const meta = await readJsonFile<LitePlaylistInfo | null>(META_FILE, null);
-      const info = { uri: saved, name: meta?.uri === saved && meta.name ? meta.name : nameFromUri(saved) };
+      const same = meta?.uri === saved;
+      const info: LitePlaylistInfo = { uri: saved, name: same && meta?.name ? meta.name : nameFromUri(saved), original: same ? meta?.original : undefined };
       try {
         setStatus('indexing');
         const next = await readPlaylist(saved);
@@ -106,7 +109,7 @@ export function useLitePlaylist(): LitePlaylistSession {
   const importFile = useCallback(async (picked: PickedPlaylist, progress?: ImportProgress) => {
     const run = ++generation.current;
     const next = await readPlaylist(picked.uri, progress);
-    const info = { uri: picked.uri, name: picked.name || nameFromUri(picked.uri) };
+    const info: LitePlaylistInfo = { uri: picked.uri, name: picked.name || nameFromUri(picked.uri), original: picked.original };
     await saveConnectionSource(picked.uri);
     await writeJsonFile(META_FILE, info);
     if (run === generation.current) {
@@ -120,10 +123,16 @@ export function useLitePlaylist(): LitePlaylistSession {
 
   const reload = useCallback(async () => {
     if (!playlist) return;
+    // The source is a private copy: "read the file again" copies the original document again.
+    if (playlist.original) {
+      const picked = await reimportPlaylistFile(playlist.original);
+      await importFile({ ...picked, name: playlist.name || picked.name });
+      return;
+    }
     const run = ++generation.current;
     const next = await readPlaylist(playlist.uri);
     if (run === generation.current) setCatalog(next);
-  }, [playlist]);
+  }, [importFile, playlist]);
 
   return { status, catalog, playlist, failure, importFile, reload };
 }

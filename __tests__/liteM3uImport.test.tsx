@@ -32,7 +32,7 @@ let handles = 0;
 const CHUNK = 5; // tiny chunks: lines and Arabic words split across reads
 
 const native = {
-  pickPlaylist: jest.fn(async (): Promise<{ uri: string; name: string; size: number } | null> => null),
+  pickPlaylist: jest.fn(async (): Promise<Record<string, unknown>> => ({ status: 'cancelled' })),
   openPlaylist: jest.fn(async (uri: string) => {
     if (!disk.has(uri)) {
       throw Object.assign(new Error(`java.io.FileNotFoundException: ${uri}`), { code: 'E_NOT_FOUND' });
@@ -216,7 +216,7 @@ async function unmount(tree: Tree) {
 const channelShown = (tree: Tree, name: string) => labelled(tree, name).length > 0;
 const pickReturns = (uri: string, text: string, name = 'iraq.m3u') => {
   disk.set(uri, text);
-  native.pickPlaylist.mockResolvedValueOnce({ uri, name, size: Buffer.byteLength(text) });
+  native.pickPlaylist.mockResolvedValueOnce({ status: 'picked', uri, name, size: Buffer.byteLength(text) });
 };
 const UPLOAD = 'رفع ملف M3U';
 const onImportScreen = (tree: Tree) => labelled(tree, UPLOAD).length > 0;
@@ -355,7 +355,7 @@ describe('Shashtna Player Lite: local M3U file only', () => {
   it('does nothing (and shows no error) when the picker is cancelled', async () => {
     const tree = await mount();
     await waitFor(tree, () => onImportScreen(tree), 'the import screen');
-    native.pickPlaylist.mockResolvedValueOnce(null);
+    native.pickPlaylist.mockResolvedValueOnce({ status: 'cancelled' });
     await press(tree, UPLOAD);
     expect(native.openPlaylist).not.toHaveBeenCalled();
     expect(allText(tree)).not.toContain('تعذر');

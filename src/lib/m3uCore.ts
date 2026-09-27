@@ -1,5 +1,6 @@
 import ReactNativeBlobUtil from 'react-native-blob-util';
 
+import { NoLiveChannelsError, PlaylistEmptyError, PlaylistFormatError } from './playlistErrors';
 import { hasNativePlaylistReader, readPlaylistFile } from './playlistPicker';
 
 /**
@@ -275,28 +276,8 @@ export function createM3UTextParser(
 
 type TextParser = ReturnType<typeof createM3UTextParser>;
 
-export class PlaylistFormatError extends Error {
-  constructor() {
-    super('The file is not an M3U playlist (no #EXTM3U / #EXTINF lines found).');
-    this.name = 'PlaylistFormatError';
-  }
-}
-
-/** The playlist has no content at all. */
-export class PlaylistEmptyError extends Error {
-  constructor() {
-    super('The playlist file is empty.');
-    this.name = 'PlaylistEmptyError';
-  }
-}
-
-/** A valid playlist, but nothing in it is a live channel (Lite). */
-export class NoLiveChannelsError extends Error {
-  constructor() {
-    super('The playlist contains no live TV channels.');
-    this.name = 'NoLiveChannelsError';
-  }
-}
+// Parse errors live in playlistErrors.ts (shared with the picker without an import cycle).
+export { NoLiveChannelsError, PlaylistEmptyError, PlaylistFormatError } from './playlistErrors';
 
 /**
  * Ends a parse and turns "nothing usable" into a specific error: an empty

@@ -191,6 +191,8 @@ export default function ConnectionScreen({ onConnected, edition, initialMethod, 
 
   const fileFieldRef = useRef<View>(null);
   const picking = useRef(false);
+  // Shown on the file field from the press until the picker returns and the file is copied.
+  const [pickerBusy, setPickerBusy] = useState(false);
   /**
    * Android TV: coming back from the system picker (or a device that has none)
    * can leave no view focused, and a remote cannot tap. Put the focus back on
@@ -206,9 +208,15 @@ export default function ConnectionScreen({ onConnected, edition, initialMethod, 
     // One picker at a time, and none while a source is loading.
     if (loading || picking.current) return;
     picking.current = true;
+    setPickerBusy(true);
     setError(null);
     try {
-      const picked = await pickPlaylistFile();
+      let picked: PickedPlaylist | null;
+      try {
+        picked = await pickPlaylistFile();
+      } finally {
+        setPickerBusy(false);
+      }
       refocusFileField();
       if (!picked) return; // cancelled
       setPickedFile(picked);
@@ -353,7 +361,8 @@ export default function ConnectionScreen({ onConnected, edition, initialMethod, 
         <FilePickerField
           fieldRef={fileFieldRef}
           file={pickedFile}
-          disabled={loading}
+          disabled={loading || pickerBusy}
+          busy={pickerBusy}
           onPick={pickFile}
           palette={palette}
           ar={ar}
@@ -580,6 +589,7 @@ function FilePickerField({
   palette,
   ar,
   disabled,
+  busy = false,
 }: {
   fieldRef?: React.Ref<View>;
   file: PickedPlaylist | null;
@@ -587,6 +597,8 @@ function FilePickerField({
   palette: Palette;
   ar: boolean;
   disabled: boolean;
+  /** The system picker is opening / the picked file is being copied. */
+  busy?: boolean;
 }) {
   const dark = palette.mode === 'dark';
   const sizeLabel =
@@ -625,12 +637,14 @@ function FilePickerField({
           numberOfLines={1}
           style={[styles.fileName, { color: file ? palette.text : palette.muted, textAlign: ar ? 'right' : 'left' }]}
         >
-          {file
-            ? `${file.name}${sizeLabel ? ` · ${sizeLabel}` : ''}${warn ? (ar ? ' · سيتم التحقق من المحتوى' : ' · content will be checked') : ''}`
-            : ar ? 'اضغط لاختيار ملف' : 'Press to choose a file'}
+          {busy
+            ? ar ? 'جاري فتح مدير الملفات…' : 'Opening the file picker…'
+            : file
+              ? `${file.name}${sizeLabel ? ` · ${sizeLabel}` : ''}${warn ? (ar ? ' · سيتم التحقق من المحتوى' : ' · content will be checked') : ''}`
+              : ar ? 'اضغط لاختيار ملف' : 'Press to choose a file'}
         </Text>
       </View>
-      <AppIcon name="chevron" size={14} color={palette.muted} />
+      {busy ? <ActivityIndicator size="small" color={palette.muted} testID="file-picker-busy" /> : <AppIcon name="chevron" size={14} color={palette.muted} />}
     </Pressable>
   );
 }

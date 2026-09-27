@@ -2,106 +2,102 @@ import fs from 'fs';
 import path from 'path';
 
 /**
- * Static audit of the native M3U picker (PlaylistPickerModule.kt), for the real
- * TV box that opened a factory test app: no launch path may reach an activity
- * the capability policy (PickerPolicy.kt, JUnit-tested) did not accept.
+ * M3U import through the Storage Access Framework.
+ *
+ * 1. Static audit of the native module (PlaylistPickerModule.kt): an implicit
+ *    SAF intent flow, no package discovery or pinning, structured results,
+ *    private copy. The flow itself (PickerFlow.kt) and the copy
+ *    (PlaylistCopier.kt) are JUnit-tested with fake device calls and real files.
+ * 2. The JS contract (playlistPicker.ts) against a stand-in for that module:
+ *    every native outcome becomes a picked file, null, or a typed error with a
+ *    structured code, never a raw native exception.
  */
 const dir = path.join(__dirname, '../android/app/src/main/java/com/shashtnaplayer');
 const moduleSrc = fs.readFileSync(path.join(dir, 'PlaylistPickerModule.kt'), 'utf8');
-const policySrc = fs.readFileSync(path.join(dir, 'PickerPolicy.kt'), 'utf8');
+const flowSrc = fs.readFileSync(path.join(dir, 'PickerFlow.kt'), 'utf8');
 
-describe('native picker audit', () => {
-  it('launches only activities the policy accepted, pinned to their exact component', () => {
-    const launches = moduleSrc.match(/startActivityForResult\(/g) || [];
-    expect(launches.length).toBe(1);
-    expect(moduleSrc).toMatch(/for \(launch in decision\.launches\) \{\s*val intent = pickerIntent\(launch\.action, launch\.openable\)\.setClassName\(launch\.packageName, launch\.activityName\)/);
-    // The old implicit / "legacy" paths are gone.
-    expect(moduleSrc).not.toMatch(/Legacy|listOf\(openDocument, getContent\)|handlersOf/);
+describe('native picker audit (SAF, no package discovery)', () => {
+  it('does not discover, choose or pin a file-manager package', () => {
+    expect(fs.existsSync(path.join(dir, 'PickerPolicy.kt'))).toBe(false);
+    for (const banned of ['queryIntentActivities', 'setClassName', 'setPackage(', 'setComponent', 'PickerPolicy', 'documentsui']) {
+      expect(moduleSrc).not.toContain(banned);
+    }
+    // The only package names in the flow are the AOSP TV platform stubs (skipped, never launched).
+    const packages = flowSrc.match(/"[a-z][a-z0-9_]*(\.[a-zA-Z0-9_]+){2,}"/g) || [];
+    expect(packages.filter(p => !p.startsWith('"android.intent.action.')).sort()).toEqual([
+      '"com.android.tv.frameworkpackagestubs"',
+      '"com.google.android.tv.frameworkpackagestubs"',
+    ]);
   });
 
-  it('no safe picker ends in E_NO_PICKER (shown as «تعذر فتح مدير الملفات على هذا الجهاز»)', () => {
-    expect(moduleSrc).toContain('take()?.reject("E_NO_PICKER"');
-    const errors = fs.readFileSync(path.join(__dirname, '../src/screens/Connection/connectionErrors.ts'), 'utf8');
-    expect(errors).toContain('تعذر فتح مدير الملفات على هذا الجهاز');
+  it('builds implicit OPEN_DOCUMENT / GET_CONTENT intents with OPENABLE and the playlist MIME list', () => {
+    expect(moduleSrc).toMatch(/private fun pickerIntent\(attempt: PickerFlow\.Attempt\): Intent =\s*Intent\(attempt\.action\)\.apply \{\s*addCategory\(Intent\.CATEGORY_OPENABLE\)\s*type = PickerFlow\.ANY_TYPE\s*if \(attempt\.filtered\) putExtra\(Intent\.EXTRA_MIME_TYPES, PickerFlow\.PLAYLIST_MIME_TYPES\.toTypedArray\(\)\)/);
+    expect(flowSrc).toMatch(/Attempt\(OPEN_DOCUMENT, filtered = true\),\s*Attempt\(OPEN_DOCUMENT, filtered = false\),\s*Attempt\(GET_CONTENT, filtered = true\),\s*Attempt\(GET_CONTENT, filtered = false\)/);
+    for (const mime of ['application/vnd.apple.mpegurl', 'application/x-mpegurl', 'audio/x-mpegurl', 'text/plain']) {
+      expect(flowSrc).toContain(`"${mime}"`);
+    }
+    expect(moduleSrc).toContain('pm.resolveActivity(pickerIntent(attempt), PackageManager.MATCH_DEFAULT_ONLY)');
+    expect(moduleSrc).toContain('activity.startActivityForResult(pickerIntent(attempt), REQUEST_CODE)');
   });
 
-  it('no device-specific package is hardcoded (only the framework stub packages)', () => {
-    // Permission names (android.permission.*) are capabilities, not packages.
-    const packages = (policySrc.match(/"[a-z][a-z0-9_]*(\.[a-zA-Z0-9_]+){2,}"/g) || []).filter(p => !p.startsWith('"android.permission.'));
-    expect(packages.sort()).toEqual(['"com.android.tv.frameworkpackagestubs"', '"com.google.android.tv.frameworkpackagestubs"']);
-    expect(moduleSrc).not.toMatch(/"com\.(?!shashtnaplayer)[a-z0-9_.]+"/i);
+  it('never rejects the picker promise with a raw exception', () => {
+    const pickingCode = moduleSrc.slice(moduleSrc.indexOf('fun pickPlaylist('), moduleSrc.indexOf('private fun playlistDir()'));
+    expect(pickingCode).not.toMatch(/\.reject\(/);
+    expect(pickingCode).toContain('(take() ?: promise).resolve(failure(PickerFlow.PICKER_LAUNCH_FAILED, error.javaClass.simpleName))');
+    expect(pickingCode).toContain('catch (_: ActivityNotFoundException)');
   });
 
-  it('AMER_TV_PICKER lines never carry the picked URI, file name or contents', () => {
+  it('copies the picked document into private storage and returns the copy', () => {
+    expect(moduleSrc).toContain('open = { context.contentResolver.openInputStream(uri) }');
+    expect(moduleSrc).toContain('private fun playlistDir() = File(context.filesDir, PLAYLIST_DIR)');
+    expect(moduleSrc).toContain('putString("uri", Uri.fromFile(result.file).toString())');
+    expect(moduleSrc).toContain('putString("original", uri.toString())');
+  });
+
+  it('takes a persistable grant only when the provider offers one', () => {
+    expect(moduleSrc).toMatch(/if \(PickerFlow\.offersPersistableRead\(flags\)\) \{\s*try \{\s*context\.contentResolver\.takePersistableUriPermission/);
+  });
+
+  it('AMER_TV_PICKER lines never carry the URI, file name or contents', () => {
     const diagCalls = moduleSrc.match(/diag\("[^\n]*"\)/g) || [];
     expect(diagCalls.length).toBeGreaterThan(5);
     for (const call of diagCalls) {
-      // Allowed: whether a document came back and its scheme (content/file); never the URI itself.
-      expect(call).not.toMatch(/\$\{?uri|\$\{?name|data\?\.data\}|\.data\b(?! != null)(?!\?\.scheme)|text|chunk/i);
+      expect(call).not.toMatch(/\$\{?uri\b(?!\?\.scheme| != null|\.scheme)|\$\{?name\b|\$original|text|chunk/i);
     }
     expect(moduleSrc).toContain('if (BuildConfig.TV_DIAGNOSTICS) Log.i(DIAG_TAG, message)');
   });
 
-  it('package-manager queries run off the UI thread; picker state stays on it', () => {
-    expect(moduleSrc).toMatch(/io\.execute \{[\s\S]*?val found = candidates\(\)[\s\S]*?PickerPolicy\.decide\(found, context\.packageName, television\)[\s\S]*?UiThreadUtil\.runOnUiThread \{ launchPicker\(promise, decision\) \}/);
-  });
-
-  it('discovery also finds OEM file managers without OPENABLE / DEFAULT, from a fixed set of queries', () => {
-    // Both forms, every discovery type, and no MATCH_DEFAULT_ONLY (the activity is launched explicitly).
-    expect(moduleSrc).toMatch(/for \(openable in listOf\(true, false\)\)/);
-    expect(moduleSrc).toMatch(/QUERY_TYPES = listOf\("\*\/\*", "text\/plain", "audio\/x-mpegurl", "application\/vnd\.apple\.mpegurl", "application\/octet-stream"\)/);
-    expect(moduleSrc).toContain('pm.queryIntentActivities(pickerIntent(action, openable, mime), PackageManager.GET_RESOLVED_FILTER)');
-    expect(moduleSrc).not.toMatch(/queryIntentActivities\([^\n]*MATCH_DEFAULT_ONLY/);
-    // Whether it takes OPENABLE comes from its own filter, not from the query that found it.
-    expect(moduleSrc).toContain('if (filter.hasCategory(Intent.CATEGORY_OPENABLE)) entry.openable = true');
-    const manifest = fs.readFileSync(path.join(__dirname, '../android/app/src/main/AndroidManifest.xml'), 'utf8');
-    const queries = manifest.slice(manifest.indexOf('<queries>'), manifest.indexOf('</queries>'));
-    expect(queries).toMatch(/GET_CONTENT" \/>\s*<data android:mimeType="\*\/\*" \/>/); // without OPENABLE
-    expect(queries).toMatch(/OPEN_DOCUMENT" \/>\s*<data android:mimeType="\*\/\*" \/>/);
-    expect(queries).toContain('android.content.action.DOCUMENTS_PROVIDER');
-  });
-
-  it('the launched MIME stays the wildcard (a text/plain launch would hide .m3u = audio/x-mpegurl)', () => {
-    expect(moduleSrc).toContain('private const val PICK_MIME = "*/*"');
-    expect(moduleSrc).toMatch(/private fun pickerIntent\(action: PickerPolicy\.Action, openable: Boolean = true, mime: String = PICK_MIME\)/);
-  });
-
-  it('only system/OEM kinds are ever launched; user-installed apps are logged, not opened', () => {
-    // The launch list is built from the tier order, which contains no USER_INSTALLED / REJECTED.
-    expect(policySrc).toContain('private val TV_ORDER = listOf(Kind.OEM_FILE_EXPLORER, Kind.DOCUMENTS_UI, Kind.SYSTEM_PICKER)');
-    expect(policySrc).toContain('private val PHONE_ORDER = listOf(Kind.DOCUMENTS_UI, Kind.OEM_FILE_EXPLORER, Kind.SYSTEM_PICKER)');
-    expect(policySrc).toMatch(/\.filter \{ it\.kind in order \}/);
-    expect(policySrc).toContain('fun isSystemOrigin(c: Candidate) = c.isSystemApp || c.isUpdatedSystemApp');
-    // TV vs phone is decided on the device.
-    expect(moduleSrc).toContain('Configuration.UI_MODE_TYPE_TELEVISION');
-    expect(moduleSrc).toContain('PackageManager.FEATURE_LEANBACK');
-  });
-
-  it('each candidate line carries origin, actions, OPENABLE, provider, score and verdict', () => {
-    for (const field of ['system=', 'updatedSystem=', 'userInstalled=', 'openDocument=', 'getContent=', 'openable=', 'documentsProvider=', 'contentUri=', 'score=', 'kind=', 'reason=']) {
-      expect(moduleSrc).toContain(field);
-    }
-    expect(moduleSrc).toContain('diag("summary oemFileExplorer=');
-    expect(moduleSrc).toContain('pick=${yn(pick)}');
-  });
-
-  it('the device inventory runs only in the diagnostics build', () => {
-    expect(moduleSrc).toMatch(/private fun logInventory\([^)]*\) \{\s*if \(!BuildConfig\.TV_DIAGNOSTICS\) return/);
-  });
-
-  it('the content:// UTF-8 chunked reader is still the ContentResolver path', () => {
-    expect(moduleSrc).toContain('context.contentResolver.openInputStream(parsed)');
+  it('the UTF-8 chunked reader is unchanged', () => {
+    expect(moduleSrc).toContain('"content" -> context.contentResolver.openInputStream(parsed) ?: throw FileNotFoundException("The provider returned no data.")');
+    expect(moduleSrc).toContain('"file" -> FileInputStream(File(parsed.path ?: ""))');
     expect(moduleSrc).toContain('InputStreamReader(counter, Charsets.UTF_8), BUFFER_CHARS');
-    expect(moduleSrc).toContain('fun readPlaylistChunk(handle: String, maxChars: Double, promise: Promise)');
   });
 });
 
-describe('JS picker outcome (AMER_TV_PICKER under ReactNativeJS)', () => {
+describe('JS picker contract (structured results, never a raw native error)', () => {
   const RN = require('react-native');
   const { setDiagnosticsSink } = require('../src/lib/tvDiagnostics');
-  const { pickPlaylistFile, PickerUnavailableError } = require('../src/lib/playlistPicker');
+  const picker = require('../src/lib/playlistPicker');
+  const { loadLocalPlaylist, PlaylistEmptyError, PlaylistFormatError } = require('../src/lib/m3uCore');
+  const { describeConnectionError } = require('../src/screens/Connection/connectionErrors');
+  const COPY = 'file:///data/user/0/com.ameriptv.player/files/playlists/import-1.m3u';
+  const disk = new Map<string, string>();
+  const native = {
+    pickPlaylist: jest.fn(),
+    reimportPlaylist: jest.fn(),
+    prunePlaylists: jest.fn(async () => 0),
+    openPlaylist: jest.fn(async (uri: string) => {
+      if (!disk.has(uri)) throw Object.assign(new Error('gone'), { code: 'E_NOT_FOUND' });
+      return uri;
+    }),
+    readPlaylistChunk: jest.fn(async (handle: string) => {
+      const text = disk.get(handle) ?? null;
+      disk.delete(handle);
+      return { text, bytes: text ? text.length : 0 };
+    }),
+    closePlaylist: jest.fn(),
+  };
   const lines: string[] = [];
-  const native = { pickPlaylist: jest.fn() };
   beforeAll(() => {
     RN.NativeModules.ShashtnaPlaylistPicker = native;
     setDiagnosticsSink((l: string) => lines.push(l));
@@ -110,22 +106,111 @@ describe('JS picker outcome (AMER_TV_PICKER under ReactNativeJS)', () => {
     setDiagnosticsSink(null);
     delete RN.NativeModules.ShashtnaPlaylistPicker;
   });
-  beforeEach(() => (lines.length = 0));
-
-  it('logs the exact native code, and E_NO_PICKER still becomes the Arabic picker error', async () => {
-    native.pickPlaylist.mockRejectedValueOnce(Object.assign(new Error('x'), { code: 'E_NO_PICKER' }));
-    await expect(pickPlaylistFile()).rejects.toBeInstanceOf(PickerUnavailableError);
-    expect(lines).toEqual(['AMER_TV_PICKER {"stage":"js:result","code":"E_NO_PICKER"}']);
+  beforeEach(() => {
+    lines.length = 0;
+    jest.clearAllMocks();
   });
 
-  it('a picked file logs PICKED without its URI or name; cancel logs CANCELLED and the next attempt works', async () => {
-    native.pickPlaylist.mockResolvedValueOnce({ uri: 'content://x/document/secret.m3u', name: 'secret.m3u', size: 10 });
-    await pickPlaylistFile();
-    native.pickPlaylist.mockResolvedValueOnce(null);
-    expect(await pickPlaylistFile()).toBeNull();
-    native.pickPlaylist.mockResolvedValueOnce({ uri: 'content://x/document/2', name: 'b.m3u', size: 1 });
-    expect(await pickPlaylistFile()).toMatchObject({ name: 'b.m3u' });
-    expect(lines.slice(0, 2)).toEqual(['AMER_TV_PICKER {"stage":"js:result","code":"PICKED"}', 'AMER_TV_PICKER {"stage":"js:result","code":"CANCELLED"}']);
-    expect(lines.join('\n')).not.toMatch(/content:|secret|\.m3u/);
+  it('OPEN_DOCUMENT success: resolves the private copy (never the provider URI) and logs PICKED', async () => {
+    native.pickPlaylist.mockResolvedValueOnce({ status: 'picked', uri: COPY, name: 'tv.m3u', size: 120, original: 'content://docs/document/7' });
+    await expect(picker.pickPlaylistFile()).resolves.toEqual({ uri: COPY, name: 'tv.m3u', size: 120, original: 'content://docs/document/7' });
+    expect(lines).toEqual(['AMER_TV_PICKER {"stage":"js:result","code":"PICKED","size":120}']);
+  });
+
+  it('no picker on the device: PICKER_UNAVAILABLE', async () => {
+    native.pickPlaylist.mockResolvedValueOnce({ status: 'error', code: 'PICKER_UNAVAILABLE', reason: 'only platform stubs' });
+    const error = await picker.pickPlaylistFile().catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(picker.PickerUnavailableError);
+    expect(error.code).toBe('PICKER_UNAVAILABLE');
+    expect(describeConnectionError(error, true).message).toContain('تعذر فتح مدير الملفات على هذا الجهاز');
+  });
+
+  it('the picker threw on launch: PICKER_LAUNCH_FAILED; a raw native rejection is mapped the same way', async () => {
+    native.pickPlaylist.mockResolvedValueOnce({ status: 'error', code: 'PICKER_LAUNCH_FAILED', reason: 'SecurityException' });
+    expect((await picker.pickPlaylistFile().catch((e: unknown) => e)).code).toBe('PICKER_LAUNCH_FAILED');
+    native.pickPlaylist.mockRejectedValueOnce(new Error('java.lang.IllegalStateException: boom'));
+    const raw = await picker.pickPlaylistFile().catch((e: unknown) => e);
+    expect(raw).toBeInstanceOf(picker.PickerUnavailableError);
+    expect(raw.code).toBe('PICKER_LAUNCH_FAILED');
+    expect(String(raw.message)).not.toContain('IllegalStateException');
+    // An unexpected shape is not trusted either.
+    native.pickPlaylist.mockResolvedValueOnce({ uri: 'content://legacy' });
+    expect((await picker.pickPlaylistFile().catch((e: unknown) => e)).code).toBe('PICKER_LAUNCH_FAILED');
+  });
+
+  it('user cancellation resolves null and logs PICKER_CANCELLED', async () => {
+    native.pickPlaylist.mockResolvedValueOnce({ status: 'cancelled' });
+    expect(await picker.pickPlaylistFile()).toBeNull();
+    expect(lines).toEqual(['AMER_TV_PICKER {"stage":"js:result","code":"PICKER_CANCELLED"}']);
+  });
+
+  it('double press: one native picker at a time (JS guard and PICKER_BUSY)', async () => {
+    let answer: (v: unknown) => void = () => {};
+    native.pickPlaylist.mockImplementationOnce(() => new Promise(resolve => (answer = resolve)));
+    const first = picker.pickPlaylistFile();
+    expect(await picker.pickPlaylistFile()).toBeNull(); // second press while the first is open
+    expect(native.pickPlaylist).toHaveBeenCalledTimes(1);
+    answer({ status: 'cancelled' });
+    expect(await first).toBeNull();
+    native.pickPlaylist.mockResolvedValueOnce({ status: 'error', code: 'PICKER_BUSY', reason: 'already_open' });
+    expect(await picker.pickPlaylistFile()).toBeNull();
+    // Afterwards a new press opens the picker again.
+    native.pickPlaylist.mockResolvedValueOnce({ status: 'cancelled' });
+    await picker.pickPlaylistFile();
+    expect(native.pickPlaylist).toHaveBeenCalledTimes(3);
+  });
+
+  it('missing read permission: FILE_READ_FAILED (permission) with the Arabic read message', async () => {
+    native.pickPlaylist.mockResolvedValueOnce({ status: 'error', code: 'FILE_READ_FAILED', reason: 'permission' });
+    const error = await picker.pickPlaylistFile().catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(picker.PlaylistReadError);
+    expect([error.code, error.reason]).toEqual(['FILE_READ_FAILED', 'permission']);
+    const shown = describeConnectionError(error, true);
+    expect(shown.message).toContain('تعذر قراءة ملف M3U');
+    expect(shown.technical).toContain('FILE_READ_FAILED:permission');
+  });
+
+  it('an empty document: EMPTY_M3U (the empty-file message)', async () => {
+    native.pickPlaylist.mockResolvedValueOnce({ status: 'error', code: 'EMPTY_M3U', reason: 'empty' });
+    const error = await picker.pickPlaylistFile().catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(PlaylistEmptyError);
+    expect(error.code).toBe('EMPTY_M3U');
+  });
+
+  it('a valid M3U copy parses into channels (content read from the private copy)', async () => {
+    disk.set(COPY, '#EXTM3U\n#EXTINF:-1 group-title="أخبار",قناة ١\nhttp://e/1.ts\n#EXTINF:-1,قناة ٢\nhttp://e/2.ts\n');
+    const channels = await loadLocalPlaylist(COPY, undefined, undefined, { liveOnly: true });
+    expect(channels.map((c: { name: string }) => c.name)).toEqual(['قناة ١', 'قناة ٢']);
+    expect(native.openPlaylist).toHaveBeenCalledWith(COPY);
+  });
+
+  it('an invalid file: INVALID_M3U', async () => {
+    disk.set(COPY, 'this is not a playlist\njust text\n');
+    const error = await loadLocalPlaylist(COPY, undefined, undefined, { liveOnly: true }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(PlaylistFormatError);
+    expect(error.code).toBe('INVALID_M3U');
+  });
+
+  it('a copy that disappeared: FILE_READ_FAILED (not_found)', async () => {
+    const error = await loadLocalPlaylist(COPY).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(picker.PlaylistReadError);
+    expect(error.reason).toBe('not_found');
+  });
+
+  it('saving a source keeps only its private copy; clearing it removes all copies', async () => {
+    const { saveConnectionSource, clearConnectionSource } = require('../src/lib/connectionSession');
+    await saveConnectionSource(COPY);
+    await new Promise(r => setTimeout(r, 0));
+    expect(native.prunePlaylists).toHaveBeenLastCalledWith([COPY]);
+    await clearConnectionSource();
+    await new Promise(r => setTimeout(r, 0));
+    expect(native.prunePlaylists).toHaveBeenLastCalledWith([]);
+  });
+
+  it('"read the file again" re-copies the original document; a gone original is FILE_READ_FAILED', async () => {
+    native.reimportPlaylist.mockResolvedValueOnce({ status: 'picked', uri: COPY, name: 'tv.m3u', size: 10, original: 'content://docs/document/7' });
+    await expect(picker.reimportPlaylistFile('content://docs/document/7')).resolves.toMatchObject({ uri: COPY });
+    native.reimportPlaylist.mockResolvedValueOnce({ status: 'error', code: 'FILE_READ_FAILED', reason: 'not_found' });
+    expect((await picker.reimportPlaylistFile('content://docs/document/7').catch((e: unknown) => e)).reason).toBe('not_found');
   });
 });

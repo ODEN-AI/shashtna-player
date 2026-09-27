@@ -58,7 +58,6 @@ async function mount(onImport = jest.fn(async () => {})): Promise<Tree> {
   await press(tree!, 'ملف M3U');
   return tree!;
 }
-const nativeError = (code: string) => Object.assign(new Error(code), { code });
 const setTV = (value: boolean) => Object.defineProperty(Platform, 'isTV', { configurable: true, get: () => value });
 
 beforeAll(() => {
@@ -75,14 +74,14 @@ afterAll(() => setTV(false));
 
 describe('عامر IPTV: ملف M3U picker on Android TV', () => {
   it('no usable file picker: clear Arabic error, and the app stays usable', async () => {
-    native.pickPlaylist.mockRejectedValueOnce(nativeError('E_NO_PICKER'));
+    native.pickPlaylist.mockResolvedValueOnce({ status: 'error', code: 'PICKER_UNAVAILABLE', reason: 'only platform stubs' });
     const tree = await mount();
     await press(tree, 'اختيار ملف قائمة التشغيل');
     await flush();
     expect(allText(tree)).toContain('تعذر فتح مدير الملفات على هذا الجهاز');
     expect(focusCalls).toHaveBeenCalled(); // remote focus back on the file field
     // Still usable: the picker can be tried again, and the account tab works.
-    native.pickPlaylist.mockResolvedValueOnce(null);
+    native.pickPlaylist.mockResolvedValueOnce({ status: 'cancelled' });
     await press(tree, 'اختيار ملف قائمة التشغيل');
     expect(native.pickPlaylist).toHaveBeenCalledTimes(2);
     await press(tree, 'بيانات الحساب');
@@ -91,7 +90,7 @@ describe('عامر IPTV: ملف M3U picker on Android TV', () => {
   });
 
   it('a picker that could not be started shows the same message', async () => {
-    native.pickPlaylist.mockRejectedValueOnce(nativeError('E_PICKER_FAILED'));
+    native.pickPlaylist.mockResolvedValueOnce({ status: 'error', code: 'PICKER_LAUNCH_FAILED', reason: 'SecurityException' });
     const tree = await mount();
     await press(tree, 'اختيار ملف قائمة التشغيل');
     await flush();
@@ -100,7 +99,7 @@ describe('عامر IPTV: ملف M3U picker on Android TV', () => {
   });
 
   it('coming back without a file (cancel / TV stub): no error, focus returns to the file field', async () => {
-    native.pickPlaylist.mockResolvedValueOnce(null);
+    native.pickPlaylist.mockResolvedValueOnce({ status: 'cancelled' });
     const tree = await mount();
     focusCalls.mockClear();
     await press(tree, 'اختيار ملف قائمة التشغيل');
@@ -112,7 +111,7 @@ describe('عامر IPTV: ملف M3U picker on Android TV', () => {
 
   it('phones and tablets are left alone: no focus requests', async () => {
     setTV(false);
-    native.pickPlaylist.mockResolvedValueOnce(null);
+    native.pickPlaylist.mockResolvedValueOnce({ status: 'cancelled' });
     const tree = await mount();
     focusCalls.mockClear();
     await press(tree, 'اختيار ملف قائمة التشغيل');
@@ -122,7 +121,7 @@ describe('عامر IPTV: ملف M3U picker on Android TV', () => {
   });
 
   it('a double tap while the picker opens (E_BUSY) is ignored, not shown as an error', async () => {
-    native.pickPlaylist.mockRejectedValueOnce(nativeError('E_BUSY'));
+    native.pickPlaylist.mockResolvedValueOnce({ status: 'error', code: 'PICKER_BUSY', reason: 'already_open' });
     const tree = await mount();
     await press(tree, 'اختيار ملف قائمة التشغيل');
     await flush();
@@ -132,7 +131,7 @@ describe('عامر IPTV: ملف M3U picker on Android TV', () => {
 
   it('while the picked file loads, the field and button stay focusable (not disabled) and ignore presses', async () => {
     let finishRead: (value: { text: string | null; bytes: number }) => void = () => {};
-    native.pickPlaylist.mockResolvedValueOnce({ uri: 'content://docs/tv.m3u', name: 'tv.m3u', size: 64 });
+    native.pickPlaylist.mockResolvedValueOnce({ status: 'picked', uri: 'file:///data/user/0/com.ameriptv.player/files/playlists/import-1.m3u', name: 'tv.m3u', size: 64, original: 'content://docs/tv.m3u' });
     native.openPlaylist.mockResolvedValueOnce('h1');
     native.readPlaylistChunk.mockImplementationOnce(() => new Promise(resolve => (finishRead = resolve)));
     const tree = await mount();
@@ -158,6 +157,48 @@ describe('عامر IPTV: ملف M3U picker on Android TV', () => {
       finishRead({ text: null, bytes: 0 });
       await done;
     });
+    ReactTestRenderer.act(() => tree.unmount());
+  });
+});
+
+describe('عامر IPTV: the upload button while the system picker is open', () => {
+  it('shows a loading state, ignores a second press, and recovers cleanly on cancel', async () => {
+    let answer: (value: unknown) => void = () => {};
+    native.pickPlaylist.mockImplementationOnce(() => new Promise(resolve => (answer = resolve)));
+    const tree = await mount();
+    const field = () => labelled(tree, 'اختيار ملف قائمة التشغيل')[0] ?? tree.root.findAll(n => n.props.accessibilityLabel === 'اختيار ملف قائمة التشغيل')[0];
+    let first: Promise<unknown> = Promise.resolve();
+    ReactTestRenderer.act(() => {
+      first = field().props.onPress();
+    });
+    await flush();
+    expect(allText(tree)).toContain('جاري فتح مدير الملفات…');
+    expect(tree.root.findAll(n => n.props.testID === 'file-picker-busy').length).toBeGreaterThan(0);
+    // Remote double press: the field ignores presses while busy, so no second picker.
+    expect(field().props.onPress).toBeUndefined();
+    expect(native.pickPlaylist).toHaveBeenCalledTimes(1);
+    focusCalls.mockClear();
+    await ReactTestRenderer.act(async () => {
+      answer({ status: 'cancelled' });
+      await first;
+    });
+    // Never stuck: loading is gone, no error, focus back on the field, and it works again.
+    expect(allText(tree)).not.toContain('جاري فتح مدير الملفات…');
+    expect(allText(tree)).not.toContain('تعذر');
+    expect(focusCalls).toHaveBeenCalled();
+    native.pickPlaylist.mockResolvedValueOnce({ status: 'cancelled' });
+    await press(tree, 'اختيار ملف قائمة التشغيل');
+    expect(native.pickPlaylist).toHaveBeenCalledTimes(2);
+    ReactTestRenderer.act(() => tree.unmount());
+  });
+
+  it('an error from the picker also ends the loading state (never stuck)', async () => {
+    native.pickPlaylist.mockResolvedValueOnce({ status: 'error', code: 'FILE_READ_FAILED', reason: 'permission' });
+    const tree = await mount();
+    await press(tree, 'اختيار ملف قائمة التشغيل');
+    await flush();
+    expect(allText(tree)).not.toContain('جاري فتح مدير الملفات…');
+    expect(allText(tree)).toContain('تعذر قراءة ملف M3U');
     ReactTestRenderer.act(() => tree.unmount());
   });
 });

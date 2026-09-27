@@ -184,7 +184,8 @@ const disk = new Map<string, string>();
 const readers = new Map<string, { text: string; pos: number }>();
 let handles = 0;
 const native = {
-  pickPlaylist: jest.fn(async (): Promise<{ uri: string; name: string; size: number } | null> => null),
+  // Native contract: structured results, never a raw rejection (PlaylistPickerModule.kt).
+  pickPlaylist: jest.fn(async (): Promise<Record<string, unknown>> => ({ status: 'cancelled' })),
   openPlaylist: jest.fn(async (uri: string) => {
     if (!disk.has(uri)) throw Object.assign(new Error(`java.io.FileNotFoundException: ${uri}`), { code: 'E_NOT_FOUND' });
     const handle = `h${++handles}`;
@@ -258,7 +259,7 @@ async function mount(): Promise<Tree> {
 const unmount = (tree: Tree) => ReactTestRenderer.act(async () => tree.unmount());
 const pickReturns = (uri: string, text: string, name = 'amer.m3u') => {
   disk.set(uri, text);
-  native.pickPlaylist.mockResolvedValueOnce({ uri, name, size: Buffer.byteLength(text) });
+  native.pickPlaylist.mockResolvedValueOnce({ status: 'picked', uri, name, size: Buffer.byteLength(text) });
 };
 const SHASHTNA = /شاشتنا|Shashtna|SHASHTNA/;
 const everything = (tree: Tree) => `${allText(tree)} | ${labels(tree).join(' | ')}`;

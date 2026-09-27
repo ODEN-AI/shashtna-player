@@ -31,7 +31,7 @@ export function describeImportError(error: unknown, ar: boolean): { message: str
           'ما في مدير ملفات على هذا الجهاز لاختيار الملف. ثبّت تطبيق مدير ملفات ثم أعد المحاولة.',
           'This device has no file picker. Install a file manager app and try again.',
         ),
-        technical: '',
+        technical: String((error as { code?: unknown }).code || 'PICKER_UNAVAILABLE'),
       };
     default:
       // PlaylistReadError and anything thrown while opening/reading the file.
